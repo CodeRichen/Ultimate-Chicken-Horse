@@ -14,7 +14,7 @@ public class GameServer {
     private static int colorIndex = 0;
 
     public static void main(String[] args) {
-        System.out.println("Game Server running on port " + PORT);
+        System.out.println("🎮 Game Server running on port " + PORT);
 
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
@@ -89,6 +89,9 @@ public class GameServer {
                         
                         // 廣播給所有其他客戶端
                         broadcast(info, playerId);
+                    } else if (obj instanceof PlatformInfo platformInfo) {
+                        // 廣播平台移動給所有其他客戶端
+                        broadcastPlatform(platformInfo, playerId);
                     }
                 }
             } catch (EOFException e) {
@@ -106,6 +109,21 @@ public class GameServer {
                     if (!entry.getKey().equals(excludeId)) {
                         try {
                             entry.getValue().out.writeObject(info);
+                            entry.getValue().out.flush();
+                        } catch (IOException e) {
+                            // 忽略發送失敗
+                        }
+                    }
+                }
+            }
+        }
+
+        private void broadcastPlatform(PlatformInfo platformInfo, String excludeId) {
+            synchronized (clients) {
+                for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+                    if (!entry.getKey().equals(excludeId)) {
+                        try {
+                            entry.getValue().out.writeObject(platformInfo);
                             entry.getValue().out.flush();
                         } catch (IOException e) {
                             // 忽略發送失敗
@@ -139,27 +157,5 @@ public class GameServer {
                 // 忽略
             }
         }
-    }
-}
-
-// 初始化訊息
-class InitMessage implements Serializable {
-    private static final long serialVersionUID = 1L;
-    public String playerId;
-    public String colorHex;
-
-    public InitMessage(String playerId, String colorHex) {
-        this.playerId = playerId;
-        this.colorHex = colorHex;
-    }
-}
-
-// 斷線訊息
-class DisconnectMessage implements Serializable {
-    private static final long serialVersionUID = 1L;
-    public String playerId;
-
-    public DisconnectMessage(String playerId) {
-        this.playerId = playerId;
     }
 }

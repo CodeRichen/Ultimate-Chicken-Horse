@@ -23,6 +23,7 @@ public class GameClient extends GameApplication {
     private List<Entity> platformEntities = new ArrayList<>();
     private Entity draggedPlatform = null;
     private Point2D dragOffset = Point2D.ZERO;
+    private int draggedPlatformId = -1;
     
     // 網路相關
     private Socket socket;
@@ -32,6 +33,10 @@ public class GameClient extends GameApplication {
     private Color myColor = Color.RED;
     private Map<String, Entity> otherPlayers = new HashMap<>();
     private boolean connected = false;
+    
+    // 平台同步相關
+    private long lastPlatformSendTime = 0;
+    private static final long PLATFORM_SYNC_INTERVAL = 50; // 50ms
 
     @Override
     protected void initSettings(GameSettings settings) {
@@ -42,7 +47,7 @@ public class GameClient extends GameApplication {
 
     @Override
     protected void initGame() {
-        // 創建平台
+        // 創建平台（順序很重要，用於ID對應）
         createPlatform(0, 550, 800, 50, Color.DARKGRAY);
         createPlatform(200, 450, 100, 20, Color.DARKBLUE);
         createPlatform(400, 350, 100, 20, Color.DARKBLUE);
@@ -108,6 +113,11 @@ public class GameClient extends GameApplication {
                         javafx.application.Platform.runLater(() -> {
                             removeOtherPlayer(disconnectMsg.playerId);
                         });
+                    } else if (obj instanceof PlatformInfo platformInfo) {
+                        // 更新平台位置
+                        javafx.application.Platform.runLater(() -> {
+                            updatePlatform(platformInfo);
+                        });
                     }
                 }
             } catch (Exception e) {
@@ -147,19 +157,22 @@ public class GameClient extends GameApplication {
         Entity otherPlayer = otherPlayers.get(info.playerId);
         
         if (otherPlayer == null) {
-            // 創建新玩家
+            // 創建新玩家（使用平滑移動組件）
             Color playerColor = Color.web(info.colorHex);
             Circle circle = new Circle(20, playerColor);
+            SmoothPlayerComponent smoothComponent = new SmoothPlayerComponent();
             otherPlayer = FXGL.entityBuilder()
                     .at(info.x, info.y)
                     .view(circle)
+                    .with(smoothComponent)
                     .buildAndAttach();
             otherPlayers.put(info.playerId, otherPlayer);
             System.out.println("➕ New player joined: " + info.playerId);
         } else {
-            // 更新位置
-            otherPlayer.setPosition(info.x, info.y);
-            otherPlayer.getTransformComponent().setScaleY(info.scaleY);
+            // 使用平滑移動更新位置
+            SmoothPlayerComponent smoothComponent = otherPlayer.getComponent(SmoothPlayerComponent.class);
+            smoothComponent.setTargetPosition(info.x, info.y);
+            smoothComponent.setTargetScaleY(info.scaleY);
         }
     }
 
@@ -168,6 +181,34 @@ public class GameClient extends GameApplication {
         if (player != null) {
             player.removeFromWorld();
             System.out.println("➖ Player left: " + playerId);
+        }
+    }
+
+    private void updatePlatform(PlatformInfo info) {
+        if (info.platformId >= 0 && info.platformId < platformEntities.size()) {
+            Entity platform = platformEntities.get(info.platformId);
+            // 只有在不是自己拖曳的平台時才更新
+            if (platform != draggedPlatform) {
+                platform.setPosition(info.x, info.y);
+            }
+        }
+    }
+
+    private void sendPlatformUpdate(int platformId, double x, double y) {
+        if (!connected) return;
+        
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastPlatformSendTime < PLATFORM_SYNC_INTERVAL) {
+            return; // 限制發送頻率
+        }
+        lastPlatformSendTime = currentTime;
+        
+        try {
+            PlatformInfo info = new PlatformInfo(platformId, x, y);
+            out.writeObject(info);
+            out.flush();
+        } catch (Exception e) {
+            System.err.println("Failed to send platform update: " + e.getMessage());
         }
     }
 
@@ -232,10 +273,12 @@ public class GameClient extends GameApplication {
             protected void onActionBegin() {
                 Point2D mousePos = FXGL.getInput().getMousePositionWorld();
                 
-                for (Entity platform : platformEntities) {
+                for (int i = 0; i < platformEntities.size(); i++) {
+                    Entity platform = platformEntities.get(i);
                     PlatformComponent pc = platform.getComponent(PlatformComponent.class);
                     if (pc.containsPoint(mousePos.getX(), mousePos.getY())) {
                         draggedPlatform = platform;
+                        draggedPlatformId = i;
                         dragOffset = new Point2D(
                             mousePos.getX() - platform.getX(),
                             mousePos.getY() - platform.getY()
@@ -249,16 +292,20 @@ public class GameClient extends GameApplication {
             protected void onAction() {
                 if (draggedPlatform != null) {
                     Point2D mousePos = FXGL.getInput().getMousePositionWorld();
-                    draggedPlatform.setPosition(
-                        mousePos.getX() - dragOffset.getX(),
-                        mousePos.getY() - dragOffset.getY()
-                    );
+                    double newX = mousePos.getX() - dragOffset.getX();
+                    double newY = mousePos.getY() - dragOffset.getY();
+                    
+                    draggedPlatform.setPosition(newX, newY);
+                    
+                    // 發送平台位置更新
+                    sendPlatformUpdate(draggedPlatformId, newX, newY);
                 }
             }
 
             @Override
             protected void onActionEnd() {
                 draggedPlatform = null;
+                draggedPlatformId = -1;
             }
         }, MouseButton.PRIMARY);
 
@@ -288,7 +335,46 @@ public class GameClient extends GameApplication {
     }
 }
 
-// 平台組件
+// ========== 平滑移動組件 ==========
+class SmoothPlayerComponent extends Component {
+    private Point2D targetPosition;
+    private double targetScaleY = 1.0;
+    private final double SMOOTHING = 0.3; // 平滑係數
+
+    public SmoothPlayerComponent() {
+        this.targetPosition = Point2D.ZERO;
+    }
+
+    public void setTargetPosition(double x, double y) {
+        this.targetPosition = new Point2D(x, y);
+    }
+
+    public void setTargetScaleY(double scaleY) {
+        this.targetScaleY = scaleY;
+    }
+
+    @Override
+    public void onUpdate(double tpf) {
+        if (targetPosition.equals(Point2D.ZERO)) {
+            targetPosition = entity.getPosition();
+            return;
+        }
+
+        // 使用線性插值平滑移動
+        Point2D currentPos = entity.getPosition();
+        double newX = currentPos.getX() + (targetPosition.getX() - currentPos.getX()) * SMOOTHING;
+        double newY = currentPos.getY() + (targetPosition.getY() - currentPos.getY()) * SMOOTHING;
+        
+        entity.setPosition(newX, newY);
+
+        // 平滑縮放
+        double currentScaleY = entity.getTransformComponent().getScaleY();
+        double newScaleY = currentScaleY + (targetScaleY - currentScaleY) * SMOOTHING;
+        entity.getTransformComponent().setScaleY(newScaleY);
+    }
+}
+
+// ========== 平台組件 ==========
 class PlatformComponent extends Component {
     private double width;
     private double height;
@@ -358,6 +444,7 @@ class PlatformComponent extends Component {
     }
 }
 
+// ========== 碰撞資訊 ==========
 class CollisionInfo {
     boolean collided;
     CollisionSide side;
@@ -372,7 +459,7 @@ enum CollisionSide {
     NONE, TOP, BOTTOM, LEFT, RIGHT
 }
 
-// 控制角色移動、跳躍、蹲下
+// ========== 玩家控制組件 ==========
 class PlayerControl extends Component {
     private double speed = 5.0;
     private double velocityX = 0;
