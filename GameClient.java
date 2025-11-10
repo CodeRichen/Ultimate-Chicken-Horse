@@ -11,7 +11,11 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.geometry.Point2D;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.io.*;
+import java.net.*;
 
 public class GameClient extends GameApplication {
 
@@ -19,34 +23,159 @@ public class GameClient extends GameApplication {
     private List<Entity> platformEntities = new ArrayList<>();
     private Entity draggedPlatform = null;
     private Point2D dragOffset = Point2D.ZERO;
+    
+    // 網路相關
+    private Socket socket;
+    private ObjectOutputStream out;
+    private ObjectInputStream in;
+    private String myPlayerId;
+    private Color myColor = Color.RED;
+    private Map<String, Entity> otherPlayers = new HashMap<>();
+    private boolean connected = false;
 
     @Override
     protected void initSettings(GameSettings settings) {
         settings.setWidth(800);
         settings.setHeight(600);
-        settings.setTitle("FXGL Platformer - Draggable Platforms");
+        settings.setTitle("FXGL Multiplayer Platformer");
     }
 
     @Override
     protected void initGame() {
-        // 地板
-        Entity floor = createPlatform(0, 550, 800, 50, Color.DARKGRAY);
-        
-        // 平台1
-        Entity platform1 = createPlatform(200, 450, 100, 20, Color.DARKBLUE);
-        
-        // 平台2
-        Entity platform2 = createPlatform(400, 350, 100, 20, Color.DARKBLUE);
-        
-        // 平台3（額外平台）
-        Entity platform3 = createPlatform(100, 250, 120, 20, Color.DARKGREEN);
+        // 創建平台
+        createPlatform(0, 550, 800, 50, Color.DARKGRAY);
+        createPlatform(200, 450, 100, 20, Color.DARKBLUE);
+        createPlatform(400, 350, 100, 20, Color.DARKBLUE);
+        createPlatform(100, 250, 120, 20, Color.DARKGREEN);
 
-        // 角色
+        // 連接伺服器
+        connectToServer();
+
+        // 創建本地玩家（顏色會在連接後更新）
         player = FXGL.entityBuilder()
                 .at(100, 500)
-                .view(new Circle(20, Color.RED))
+                .view(new Circle(20, myColor))
                 .with(new PlayerControl(platformEntities))
                 .buildAndAttach();
+
+        // 啟動網路接收執行緒
+        startNetworkThread();
+        
+        // 啟動位置發送執行緒
+        startPositionSender();
+    }
+
+    private void connectToServer() {
+        try {
+            socket = new Socket("localhost", 5000);
+            out = new ObjectOutputStream(socket.getOutputStream());
+            out.flush();
+            in = new ObjectInputStream(socket.getInputStream());
+            
+            // 接收初始化訊息
+            Object initObj = in.readObject();
+            if (initObj instanceof InitMessage initMsg) {
+                myPlayerId = initMsg.playerId;
+                myColor = Color.web(initMsg.colorHex);
+                connected = true;
+                System.out.println("✅ Connected as " + myPlayerId + " with color " + initMsg.colorHex);
+                
+                // 更新玩家顏色
+                if (player != null) {
+                    Circle circle = (Circle) player.getViewComponent().getChildren().get(0);
+                    circle.setFill(myColor);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Failed to connect to server: " + e.getMessage());
+            connected = false;
+        }
+    }
+
+    private void startNetworkThread() {
+        new Thread(() -> {
+            try {
+                while (connected) {
+                    Object obj = in.readObject();
+                    
+                    if (obj instanceof PlayerInfo info) {
+                        // 更新其他玩家位置
+                        javafx.application.Platform.runLater(() -> {
+                            updateOtherPlayer(info);
+                        });
+                    } else if (obj instanceof DisconnectMessage disconnectMsg) {
+                        // 移除離線玩家
+                        javafx.application.Platform.runLater(() -> {
+                            removeOtherPlayer(disconnectMsg.playerId);
+                        });
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("⚠️ Network thread error: " + e.getMessage());
+                connected = false;
+            }
+        }).start();
+    }
+
+    private void startPositionSender() {
+        new Thread(() -> {
+            while (connected) {
+                try {
+                    if (player != null) {
+                        PlayerControl pc = player.getComponent(PlayerControl.class);
+                        PlayerInfo info = new PlayerInfo(
+                            myPlayerId,
+                            toHex(myColor),
+                            player.getX(),
+                            player.getY(),
+                            pc.isCrouching(),
+                            player.getTransformComponent().getScaleY()
+                        );
+                        out.writeObject(info);
+                        out.flush();
+                    }
+                    Thread.sleep(50); // 每50ms發送一次
+                } catch (Exception e) {
+                    connected = false;
+                    break;
+                }
+            }
+        }).start();
+    }
+
+    private void updateOtherPlayer(PlayerInfo info) {
+        Entity otherPlayer = otherPlayers.get(info.playerId);
+        
+        if (otherPlayer == null) {
+            // 創建新玩家
+            Color playerColor = Color.web(info.colorHex);
+            Circle circle = new Circle(20, playerColor);
+            otherPlayer = FXGL.entityBuilder()
+                    .at(info.x, info.y)
+                    .view(circle)
+                    .buildAndAttach();
+            otherPlayers.put(info.playerId, otherPlayer);
+            System.out.println("➕ New player joined: " + info.playerId);
+        } else {
+            // 更新位置
+            otherPlayer.setPosition(info.x, info.y);
+            otherPlayer.getTransformComponent().setScaleY(info.scaleY);
+        }
+    }
+
+    private void removeOtherPlayer(String playerId) {
+        Entity player = otherPlayers.remove(playerId);
+        if (player != null) {
+            player.removeFromWorld();
+            System.out.println("➖ Player left: " + playerId);
+        }
+    }
+
+    private String toHex(Color color) {
+        return String.format("#%02X%02X%02X",
+            (int)(color.getRed() * 255),
+            (int)(color.getGreen() * 255),
+            (int)(color.getBlue() * 255));
     }
 
     private Entity createPlatform(double x, double y, double width, double height, Color color) {
@@ -103,7 +232,6 @@ public class GameClient extends GameApplication {
             protected void onActionBegin() {
                 Point2D mousePos = FXGL.getInput().getMousePositionWorld();
                 
-                // 檢查是否點擊到平台
                 for (Entity platform : platformEntities) {
                     PlatformComponent pc = platform.getComponent(PlatformComponent.class);
                     if (pc.containsPoint(mousePos.getX(), mousePos.getY())) {
@@ -138,9 +266,21 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Quit") {
             @Override
             protected void onActionBegin() {
+                cleanup();
                 FXGL.getGameController().exit();
             }
         }, KeyCode.Q);
+    }
+
+    private void cleanup() {
+        connected = false;
+        try {
+            if (out != null) out.close();
+            if (in != null) in.close();
+            if (socket != null) socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public static void main(String[] args) {
@@ -175,20 +315,17 @@ class PlatformComponent extends Component {
         return x >= left && x <= right && y >= top && y <= bottom;
     }
 
-    // 檢查與圓形玩家的碰撞
     public CollisionInfo checkCollision(double playerX, double playerY, double radius, double velocityY) {
         double platformLeft = entity.getX();
         double platformRight = entity.getX() + width;
         double platformTop = entity.getY();
         double platformBottom = entity.getY() + height;
 
-        // 玩家邊界
         double playerLeft = playerX - radius;
         double playerRight = playerX + radius;
         double playerTop = playerY - radius;
         double playerBottom = playerY + radius;
 
-        // 檢查是否有重疊
         boolean overlapping = !(playerRight < platformLeft || 
                                 playerLeft > platformRight || 
                                 playerBottom < platformTop || 
@@ -198,13 +335,11 @@ class PlatformComponent extends Component {
             return new CollisionInfo(false, CollisionSide.NONE);
         }
 
-        // 計算重疊深度
         double overlapLeft = playerRight - platformLeft;
         double overlapRight = platformRight - playerLeft;
         double overlapTop = playerBottom - platformTop;
         double overlapBottom = platformBottom - playerTop;
 
-        // 找出最小重疊（決定碰撞方向）
         double minOverlap = Math.min(Math.min(overlapLeft, overlapRight), 
                                      Math.min(overlapTop, overlapBottom));
 
@@ -223,7 +358,6 @@ class PlatformComponent extends Component {
     }
 }
 
-// 碰撞信息
 class CollisionInfo {
     boolean collided;
     CollisionSide side;
@@ -246,10 +380,10 @@ class PlayerControl extends Component {
     private double jumpStrength = 15.0;
     private double gravity = 0.8;
     private boolean onGround = false;
+    private boolean crouching = false;
     private List<Entity> platforms;
     private double playerRadius = 20;
     
-    // 邊界限制
     private final double LEFT_BOUNDARY = 20;
     private final double RIGHT_BOUNDARY = 780;
     private final double TOP_BOUNDARY = 20;
@@ -260,21 +394,13 @@ class PlayerControl extends Component {
 
     @Override
     public void onUpdate(double tpf) {
-        // 應用重力
         velocityY += gravity;
         
-        // 保存原始位置
-        double oldX = entity.getX();
-        double oldY = entity.getY();
-        
-        // 嘗試移動
         entity.translateX(velocityX);
         entity.translateY(velocityY);
         
-        // 重置標記
         onGround = false;
         
-        // 檢查與所有平台的碰撞
         for (Entity platform : platforms) {
             PlatformComponent pc = platform.getComponent(PlatformComponent.class);
             CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), playerRadius, velocityY);
@@ -282,26 +408,19 @@ class PlayerControl extends Component {
             if (collision.collided) {
                 switch (collision.side) {
                     case TOP:
-                        // 從上方碰撞（站在平台上）
                         entity.setY(platform.getY() - playerRadius);
                         velocityY = 0;
                         onGround = true;
                         break;
-                        
                     case BOTTOM:
-                        // 從下方碰撞（頭撞到平台）
                         entity.setY(platform.getY() + pc.getHeight() + playerRadius);
                         velocityY = 0;
                         break;
-                        
                     case LEFT:
-                        // 從左側碰撞
                         entity.setX(platform.getX() - playerRadius);
                         velocityX = 0;
                         break;
-                        
                     case RIGHT:
-                        // 從右側碰撞
                         entity.setX(platform.getX() + pc.getWidth() + playerRadius);
                         velocityX = 0;
                         break;
@@ -309,26 +428,19 @@ class PlayerControl extends Component {
             }
         }
         
-        // 邊界檢查
-        if (entity.getX() < LEFT_BOUNDARY) {
-            entity.setX(LEFT_BOUNDARY);
-        }
-        if (entity.getX() > RIGHT_BOUNDARY) {
-            entity.setX(RIGHT_BOUNDARY);
-        }
+        if (entity.getX() < LEFT_BOUNDARY) entity.setX(LEFT_BOUNDARY);
+        if (entity.getX() > RIGHT_BOUNDARY) entity.setX(RIGHT_BOUNDARY);
         if (entity.getY() < TOP_BOUNDARY) {
             entity.setY(TOP_BOUNDARY);
             velocityY = 0;
         }
         
-        // 防止掉出地圖底部
         if (entity.getY() > 600) {
             entity.setY(500);
             velocityY = 0;
             onGround = true;
         }
         
-        // 重置水平速度
         velocityX = 0;
     }
 
@@ -348,6 +460,11 @@ class PlayerControl extends Component {
     }
 
     public void crouch(boolean crouching) {
+        this.crouching = crouching;
         entity.getTransformComponent().setScaleY(crouching ? 0.5 : 1.0);
+    }
+    
+    public boolean isCrouching() {
+        return crouching;
     }
 }
