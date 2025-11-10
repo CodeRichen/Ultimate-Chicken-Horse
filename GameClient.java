@@ -25,7 +25,6 @@ public class GameClient extends GameApplication {
     private Point2D dragOffset = Point2D.ZERO;
     private int draggedPlatformId = -1;
     
-    // 網路相關
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
@@ -35,8 +34,8 @@ public class GameClient extends GameApplication {
     private volatile boolean connected = false;
     private volatile boolean running = true;
     
-    // 平台同步相關 - 使用平滑移動
     private Map<Integer, SmoothPlatformComponent> platformSmoothComponents = new HashMap<>();
+    private Map<Integer, Point2D> myPlatformPositions = new HashMap<>();
 
     @Override
     protected void initSettings(GameSettings settings) {
@@ -47,62 +46,54 @@ public class GameClient extends GameApplication {
 
     @Override
     protected void initGame() {
-        // 創建平台（順序很重要，用於ID對應）
         createPlatform(0, 550, 800, 50, Color.DARKGRAY);
         createPlatform(200, 450, 100, 20, Color.DARKBLUE);
         createPlatform(400, 350, 100, 20, Color.DARKBLUE);
         createPlatform(100, 250, 120, 20, Color.DARKGREEN);
 
-        // 為每個平台添加平滑移動組件
         for (int i = 0; i < platformEntities.size(); i++) {
             SmoothPlatformComponent smoothComp = new SmoothPlatformComponent();
             platformEntities.get(i).addComponent(smoothComp);
             platformSmoothComponents.put(i, smoothComp);
+            myPlatformPositions.put(i, platformEntities.get(i).getPosition());
         }
 
-        // 連接伺服器
         connectToServer();
 
-        // 創建本地玩家（顏色會在連接後更新）
         player = FXGL.entityBuilder()
                 .at(100, 500)
                 .view(new Circle(20, myColor))
                 .with(new PlayerControl(platformEntities))
                 .buildAndAttach();
 
-        // 啟動網路接收執行緒
         startNetworkThread();
-        
-        // 啟動位置發送執行緒
         startPositionSender();
     }
 
     private void connectToServer() {
         try {
             socket = new Socket("localhost", 5000);
-            socket.setTcpNoDelay(true); // 禁用 Nagle 算法，減少延遲
-            socket.setSoTimeout(0); // 無限等待
+            socket.setTcpNoDelay(true);
+            socket.setSoTimeout(0);
             
             out = new ObjectOutputStream(socket.getOutputStream());
             out.flush();
             in = new ObjectInputStream(socket.getInputStream());
             
-            // 接收初始化訊息
             Object initObj = in.readObject();
             if (initObj instanceof InitMessage initMsg) {
                 myPlayerId = initMsg.playerId;
                 myColor = Color.web(initMsg.colorHex);
                 connected = true;
-                System.out.println("✅ Connected as " + myPlayerId + " with color " + initMsg.colorHex);
+                System.out.println("Connected as " + myPlayerId + " with color " + initMsg.colorHex);
                 
-                // 更新玩家顏色
                 if (player != null) {
                     Circle circle = (Circle) player.getViewComponent().getChildren().get(0);
                     circle.setFill(myColor);
                 }
             }
         } catch (Exception e) {
-            System.err.println("❌ Failed to connect to server: " + e.getMessage());
+            System.err.println("Failed to connect to server: " + e.getMessage());
             connected = false;
         }
     }
@@ -115,33 +106,29 @@ public class GameClient extends GameApplication {
                         Object obj = in.readObject();
                         
                         if (obj instanceof PlayerInfo info) {
-                            // 更新其他玩家位置
                             javafx.application.Platform.runLater(() -> {
                                 updateOtherPlayer(info);
                             });
                         } else if (obj instanceof DisconnectMessage disconnectMsg) {
-                            // 移除離線玩家
                             javafx.application.Platform.runLater(() -> {
                                 removeOtherPlayer(disconnectMsg.playerId);
                             });
                         } else if (obj instanceof PlatformInfo platformInfo) {
-                            // 更新平台位置 - 使用平滑移動
                             javafx.application.Platform.runLater(() -> {
                                 updatePlatformSmooth(platformInfo);
                             });
                         }
                     } catch (EOFException | SocketException e) {
-                        System.err.println("⚠️ Connection lost");
+                        System.err.println("Connection lost");
                         break;
                     } catch (StreamCorruptedException e) {
-                        System.err.println("⚠️ Stream corrupted, reconnection needed");
+                        System.err.println("Stream corrupted, reconnection needed");
                         break;
                     }
                 }
             } catch (Exception e) {
                 if (running) {
-                    System.err.println("⚠️ Network thread error: " + e.getMessage());
-                    e.printStackTrace();
+                    System.err.println("Network thread error: " + e.getMessage());
                 }
             } finally {
                 connected = false;
@@ -166,13 +153,13 @@ public class GameClient extends GameApplication {
                             );
                             out.writeObject(info);
                             out.flush();
-                            out.reset(); // 清除快取，避免物件重用問題
+                            out.reset();
                         }
                     }
-                    Thread.sleep(50); // 每50ms發送一次
+                    Thread.sleep(50);
                 } catch (Exception e) {
                     if (running) {
-                        System.err.println("⚠️ Position sender error: " + e.getMessage());
+                        System.err.println("Position sender error: " + e.getMessage());
                         connected = false;
                     }
                     break;
@@ -185,7 +172,6 @@ public class GameClient extends GameApplication {
         Entity otherPlayer = otherPlayers.get(info.playerId);
         
         if (otherPlayer == null) {
-            // 創建新玩家（使用平滑移動組件）
             Color playerColor = Color.web(info.colorHex);
             Circle circle = new Circle(20, playerColor);
             SmoothPlayerComponent smoothComponent = new SmoothPlayerComponent();
@@ -195,9 +181,8 @@ public class GameClient extends GameApplication {
                     .with(smoothComponent)
                     .buildAndAttach();
             otherPlayers.put(info.playerId, otherPlayer);
-            System.out.println("➕ New player joined: " + info.playerId);
+            System.out.println("New player joined: " + info.playerId);
         } else {
-            // 使用平滑移動更新位置
             SmoothPlayerComponent smoothComponent = otherPlayer.getComponent(SmoothPlayerComponent.class);
             smoothComponent.setTargetPosition(info.x, info.y);
             smoothComponent.setTargetScaleY(info.scaleY);
@@ -208,19 +193,22 @@ public class GameClient extends GameApplication {
         Entity player = otherPlayers.remove(playerId);
         if (player != null) {
             player.removeFromWorld();
-            System.out.println("➖ Player left: " + playerId);
+            System.out.println("Player left: " + playerId);
         }
     }
 
     private void updatePlatformSmooth(PlatformInfo info) {
         if (info.platformId >= 0 && info.platformId < platformEntities.size()) {
             Entity platform = platformEntities.get(info.platformId);
-            // 只有在不是自己拖曳的平台時才更新
-            if (platform != draggedPlatform) {
-                SmoothPlatformComponent smoothComp = platformSmoothComponents.get(info.platformId);
-                if (smoothComp != null) {
-                    smoothComp.setTargetPosition(info.x, info.y);
-                }
+            
+            if (draggedPlatformId == info.platformId) {
+                return;
+            }
+            
+            SmoothPlatformComponent smoothComp = platformSmoothComponents.get(info.platformId);
+            if (smoothComp != null) {
+                smoothComp.setTargetPosition(info.x, info.y);
+                myPlatformPositions.put(info.platformId, new Point2D(info.x, info.y));
             }
         }
     }
@@ -233,10 +221,10 @@ public class GameClient extends GameApplication {
                 PlatformInfo info = new PlatformInfo(platformId, x, y);
                 out.writeObject(info);
                 out.flush();
-                out.reset(); // 清除快取
+                out.reset();
             }
         } catch (Exception e) {
-            System.err.println("⚠️ Failed to send platform update: " + e.getMessage());
+            System.err.println("Failed to send platform update: " + e.getMessage());
             connected = false;
         }
     }
@@ -262,7 +250,6 @@ public class GameClient extends GameApplication {
 
     @Override
     protected void initInput() {
-        // 玩家控制
         FXGL.getInput().addAction(new UserAction("Move Left") {
             @Override
             protected void onAction() {
@@ -296,7 +283,6 @@ public class GameClient extends GameApplication {
             }
         }, KeyCode.DOWN);
 
-        // 滑鼠拖曳平台
         FXGL.getInput().addAction(new UserAction("Drag Platform") {
             @Override
             protected void onActionBegin() {
@@ -312,6 +298,11 @@ public class GameClient extends GameApplication {
                             mousePos.getX() - platform.getX(),
                             mousePos.getY() - platform.getY()
                         );
+                        
+                        SmoothPlatformComponent smoothComp = platformSmoothComponents.get(i);
+                        if (smoothComp != null) {
+                            smoothComp.disable();
+                        }
                         break;
                     }
                 }
@@ -325,20 +316,27 @@ public class GameClient extends GameApplication {
                     double newY = mousePos.getY() - dragOffset.getY();
                     
                     draggedPlatform.setPosition(newX, newY);
+                    myPlatformPositions.put(draggedPlatformId, new Point2D(newX, newY));
                     
-                    // 發送平台位置更新（每幀都發送，伺服器會限流）
                     sendPlatformUpdate(draggedPlatformId, newX, newY);
                 }
             }
 
             @Override
             protected void onActionEnd() {
+                if (draggedPlatformId != -1) {
+                    SmoothPlatformComponent smoothComp = platformSmoothComponents.get(draggedPlatformId);
+                    if (smoothComp != null) {
+                        Point2D finalPos = draggedPlatform.getPosition();
+                        smoothComp.setTargetPosition(finalPos.getX(), finalPos.getY());
+                        smoothComp.enable();
+                    }
+                }
                 draggedPlatform = null;
                 draggedPlatformId = -1;
             }
         }, MouseButton.PRIMARY);
 
-        // 按 Q 退出
         FXGL.getInput().addAction(new UserAction("Quit") {
             @Override
             protected void onActionBegin() {
@@ -352,7 +350,7 @@ public class GameClient extends GameApplication {
         running = false;
         connected = false;
         try {
-            Thread.sleep(100); // 等待執行緒結束
+            Thread.sleep(100);
             if (out != null) out.close();
             if (in != null) in.close();
             if (socket != null) socket.close();
@@ -366,11 +364,10 @@ public class GameClient extends GameApplication {
     }
 }
 
-// ========== 平滑移動組件（玩家） ==========
 class SmoothPlayerComponent extends Component {
     private Point2D targetPosition;
     private double targetScaleY = 1.0;
-    private final double SMOOTHING = 0.3; // 平滑係數
+    private final double SMOOTHING = 0.3;
 
     public SmoothPlayerComponent() {
         this.targetPosition = Point2D.ZERO;
@@ -391,25 +388,23 @@ class SmoothPlayerComponent extends Component {
             return;
         }
 
-        // 使用線性插值平滑移動
         Point2D currentPos = entity.getPosition();
         double newX = currentPos.getX() + (targetPosition.getX() - currentPos.getX()) * SMOOTHING;
         double newY = currentPos.getY() + (targetPosition.getY() - currentPos.getY()) * SMOOTHING;
         
         entity.setPosition(newX, newY);
 
-        // 平滑縮放
         double currentScaleY = entity.getTransformComponent().getScaleY();
         double newScaleY = currentScaleY + (targetScaleY - currentScaleY) * SMOOTHING;
         entity.getTransformComponent().setScaleY(newScaleY);
     }
 }
 
-// ========== 平滑移動組件（平台） ==========
 class SmoothPlatformComponent extends Component {
     private Point2D targetPosition;
-    private final double SMOOTHING = 0.25; // 平台平滑係數（稍慢一點）
+    private final double SMOOTHING = 0.25;
     private boolean initialized = false;
+    private boolean enabled = true;
 
     public SmoothPlatformComponent() {
         this.targetPosition = Point2D.ZERO;
@@ -419,8 +414,21 @@ class SmoothPlatformComponent extends Component {
         this.targetPosition = new Point2D(x, y);
     }
 
+    public void disable() {
+        enabled = false;
+    }
+
+    public void enable() {
+        enabled = true;
+        targetPosition = entity.getPosition();
+    }
+
     @Override
     public void onUpdate(double tpf) {
+        if (!enabled) {
+            return;
+        }
+
         if (!initialized) {
             targetPosition = entity.getPosition();
             initialized = true;
@@ -431,11 +439,9 @@ class SmoothPlatformComponent extends Component {
             return;
         }
 
-        // 使用線性插值平滑移動平台
         Point2D currentPos = entity.getPosition();
         double distance = currentPos.distance(targetPosition);
         
-        // 如果距離太小就直接設定，避免抖動
         if (distance < 0.5) {
             entity.setPosition(targetPosition);
         } else {
@@ -446,7 +452,6 @@ class SmoothPlatformComponent extends Component {
     }
 }
 
-// ========== 平台組件 ==========
 class PlatformComponent extends Component {
     private double width;
     private double height;
@@ -501,14 +506,15 @@ class PlatformComponent extends Component {
         double minOverlap = Math.min(Math.min(overlapLeft, overlapRight), 
                                      Math.min(overlapTop, overlapBottom));
 
-        CollisionSide side;
-        if (minOverlap == overlapTop && velocityY > 0) {
+        CollisionSide side = CollisionSide.NONE;
+        
+        if (minOverlap == overlapTop && velocityY >= 0) {
             side = CollisionSide.TOP;
-        } else if (minOverlap == overlapBottom && velocityY < 0) {
+        } else if (minOverlap == overlapBottom && velocityY <= 0) {
             side = CollisionSide.BOTTOM;
-        } else if (minOverlap == overlapLeft) {
+        } else if (minOverlap == overlapLeft && velocityY < 5) {
             side = CollisionSide.LEFT;
-        } else {
+        } else if (minOverlap == overlapRight && velocityY < 5) {
             side = CollisionSide.RIGHT;
         }
 
@@ -516,7 +522,6 @@ class PlatformComponent extends Component {
     }
 }
 
-// ========== 碰撞資訊 ==========
 class CollisionInfo {
     boolean collided;
     CollisionSide side;
@@ -531,7 +536,6 @@ enum CollisionSide {
     NONE, TOP, BOTTOM, LEFT, RIGHT
 }
 
-// ========== 玩家控制組件 ==========
 class PlayerControl extends Component {
     private double speed = 5.0;
     private double velocityX = 0;
@@ -546,6 +550,7 @@ class PlayerControl extends Component {
     private final double LEFT_BOUNDARY = 20;
     private final double RIGHT_BOUNDARY = 780;
     private final double TOP_BOUNDARY = 20;
+    private final double MAX_VELOCITY_Y = 20;
 
     public PlayerControl(List<Entity> platforms) {
         this.platforms = platforms;
@@ -555,8 +560,18 @@ class PlayerControl extends Component {
     public void onUpdate(double tpf) {
         velocityY += gravity;
         
-        entity.translateX(velocityX);
-        entity.translateY(velocityY);
+        if (velocityY > MAX_VELOCITY_Y) {
+            velocityY = MAX_VELOCITY_Y;
+        }
+        if (velocityY < -MAX_VELOCITY_Y) {
+            velocityY = -MAX_VELOCITY_Y;
+        }
+        
+        double newX = entity.getX() + velocityX;
+        double newY = entity.getY() + velocityY;
+        
+        entity.setX(newX);
+        entity.setY(newY);
         
         onGround = false;
         
@@ -567,13 +582,19 @@ class PlayerControl extends Component {
             if (collision.collided) {
                 switch (collision.side) {
                     case TOP:
-                        entity.setY(platform.getY() - playerRadius);
-                        velocityY = 0;
+                        double platformTop = platform.getY();
+                        entity.setY(platformTop - playerRadius);
+                        if (velocityY > 0) {
+                            velocityY = 0;
+                        }
                         onGround = true;
                         break;
                     case BOTTOM:
-                        entity.setY(platform.getY() + pc.getHeight() + playerRadius);
-                        velocityY = 0;
+                        double platformBottom = platform.getY() + pc.getHeight();
+                        entity.setY(platformBottom + playerRadius);
+                        if (velocityY < 0) {
+                            velocityY = 0;
+                        }
                         break;
                     case LEFT:
                         entity.setX(platform.getX() - playerRadius);
@@ -587,8 +608,14 @@ class PlayerControl extends Component {
             }
         }
         
-        if (entity.getX() < LEFT_BOUNDARY) entity.setX(LEFT_BOUNDARY);
-        if (entity.getX() > RIGHT_BOUNDARY) entity.setX(RIGHT_BOUNDARY);
+        if (entity.getX() < LEFT_BOUNDARY) {
+            entity.setX(LEFT_BOUNDARY);
+            velocityX = 0;
+        }
+        if (entity.getX() > RIGHT_BOUNDARY) {
+            entity.setX(RIGHT_BOUNDARY);
+            velocityX = 0;
+        }
         if (entity.getY() < TOP_BOUNDARY) {
             entity.setY(TOP_BOUNDARY);
             velocityY = 0;
