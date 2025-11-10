@@ -19,6 +19,8 @@ public class GameServer {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
                 Socket socket = serverSocket.accept();
+                socket.setTcpNoDelay(true); // 禁用 Nagle 算法
+                
                 String playerId = UUID.randomUUID().toString().substring(0, 8);
                 String color = COLORS[colorIndex++ % COLORS.length];
                 
@@ -39,6 +41,7 @@ public class GameServer {
         private String color;
         private ObjectOutputStream out;
         private ObjectInputStream in;
+        private volatile boolean running = true;
 
         public ClientHandler(Socket socket, String playerId, String color) {
             this.socket = socket;
@@ -55,8 +58,10 @@ public class GameServer {
 
                 // 發送自己的玩家ID和顏色
                 InitMessage initMsg = new InitMessage(playerId, color);
-                out.writeObject(initMsg);
-                out.flush();
+                synchronized (out) {
+                    out.writeObject(initMsg);
+                    out.flush();
+                }
 
                 // 發送現有玩家列表
                 synchronized (clients) {
@@ -68,8 +73,10 @@ public class GameServer {
                                 entry.getValue().color, 
                                 100, 500, false, 1.0
                             );
-                            out.writeObject(existingPlayer);
-                            out.flush();
+                            synchronized (out) {
+                                out.writeObject(existingPlayer);
+                                out.flush();
+                            }
                         }
                     }
                 }
@@ -79,23 +86,29 @@ public class GameServer {
                 broadcast(newPlayerInfo, playerId);
 
                 // 接收並廣播玩家位置更新
-                while (true) {
-                    Object obj = in.readObject();
-                    
-                    if (obj instanceof PlayerInfo info) {
-                        // 確保玩家ID和顏色正確
-                        info.playerId = playerId;
-                        info.colorHex = color;
+                while (running) {
+                    try {
+                        Object obj = in.readObject();
                         
-                        // 廣播給所有其他客戶端
-                        broadcast(info, playerId);
-                    } else if (obj instanceof PlatformInfo platformInfo) {
-                        // 廣播平台移動給所有其他客戶端
-                        broadcastPlatform(platformInfo, playerId);
+                        if (obj instanceof PlayerInfo info) {
+                            // 確保玩家ID和顏色正確
+                            info.playerId = playerId;
+                            info.colorHex = color;
+                            
+                            // 廣播給所有其他客戶端
+                            broadcast(info, playerId);
+                        } else if (obj instanceof PlatformInfo platformInfo) {
+                            // 廣播平台移動給所有其他客戶端
+                            broadcastPlatform(platformInfo, playerId);
+                        }
+                    } catch (EOFException | SocketException e) {
+                        System.out.println("❌ Client disconnected: " + playerId);
+                        break;
+                    } catch (StreamCorruptedException e) {
+                        System.out.println("⚠️ Stream corrupted for client " + playerId);
+                        break;
                     }
                 }
-            } catch (EOFException e) {
-                System.out.println("❌ Client disconnected: " + playerId);
             } catch (Exception e) {
                 System.out.println("⚠️ Error with client " + playerId + ": " + e.getMessage());
             } finally {
@@ -104,48 +117,67 @@ public class GameServer {
         }
 
         private void broadcast(PlayerInfo info, String excludeId) {
+            List<String> deadClients = new ArrayList<>();
+            
             synchronized (clients) {
                 for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
                     if (!entry.getKey().equals(excludeId)) {
-                        try {
-                            entry.getValue().out.writeObject(info);
-                            entry.getValue().out.flush();
-                        } catch (IOException e) {
-                            // 忽略發送失敗
+                        ClientHandler handler = entry.getValue();
+                        if (!handler.sendObject(info)) {
+                            deadClients.add(entry.getKey());
                         }
                     }
                 }
+            }
+            
+            // 移除死亡連線
+            for (String deadId : deadClients) {
+                clients.remove(deadId);
             }
         }
 
         private void broadcastPlatform(PlatformInfo platformInfo, String excludeId) {
+            List<String> deadClients = new ArrayList<>();
+            
             synchronized (clients) {
                 for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
                     if (!entry.getKey().equals(excludeId)) {
-                        try {
-                            entry.getValue().out.writeObject(platformInfo);
-                            entry.getValue().out.flush();
-                        } catch (IOException e) {
-                            // 忽略發送失敗
+                        ClientHandler handler = entry.getValue();
+                        if (!handler.sendObject(platformInfo)) {
+                            deadClients.add(entry.getKey());
                         }
                     }
                 }
             }
+            
+            // 移除死亡連線
+            for (String deadId : deadClients) {
+                clients.remove(deadId);
+            }
+        }
+
+        private boolean sendObject(Object obj) {
+            try {
+                synchronized (out) {
+                    out.writeObject(obj);
+                    out.flush();
+                    out.reset(); // 清除快取，避免物件重用問題
+                }
+                return true;
+            } catch (IOException e) {
+                return false;
+            }
         }
 
         private void cleanup() {
+            running = false;
             clients.remove(playerId);
             
             // 通知其他玩家該玩家離開
             DisconnectMessage disconnectMsg = new DisconnectMessage(playerId);
             synchronized (clients) {
                 for (ClientHandler handler : clients.values()) {
-                    try {
-                        handler.out.writeObject(disconnectMsg);
-                        handler.out.flush();
-                    } catch (IOException e) {
-                        // 忽略
-                    }
+                    handler.sendObject(disconnectMsg);
                 }
             }
             
@@ -156,6 +188,8 @@ public class GameServer {
             } catch (IOException e) {
                 // 忽略
             }
+            
+            System.out.println("🔌 Client " + playerId + " fully cleaned up");
         }
     }
 }

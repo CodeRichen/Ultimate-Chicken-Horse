@@ -32,11 +32,11 @@ public class GameClient extends GameApplication {
     private String myPlayerId;
     private Color myColor = Color.RED;
     private Map<String, Entity> otherPlayers = new HashMap<>();
-    private boolean connected = false;
+    private volatile boolean connected = false;
+    private volatile boolean running = true;
     
-    // 平台同步相關
-    private long lastPlatformSendTime = 0;
-    private static final long PLATFORM_SYNC_INTERVAL = 50; // 50ms
+    // 平台同步相關 - 使用平滑移動
+    private Map<Integer, SmoothPlatformComponent> platformSmoothComponents = new HashMap<>();
 
     @Override
     protected void initSettings(GameSettings settings) {
@@ -52,6 +52,13 @@ public class GameClient extends GameApplication {
         createPlatform(200, 450, 100, 20, Color.DARKBLUE);
         createPlatform(400, 350, 100, 20, Color.DARKBLUE);
         createPlatform(100, 250, 120, 20, Color.DARKGREEN);
+
+        // 為每個平台添加平滑移動組件
+        for (int i = 0; i < platformEntities.size(); i++) {
+            SmoothPlatformComponent smoothComp = new SmoothPlatformComponent();
+            platformEntities.get(i).addComponent(smoothComp);
+            platformSmoothComponents.put(i, smoothComp);
+        }
 
         // 連接伺服器
         connectToServer();
@@ -73,6 +80,9 @@ public class GameClient extends GameApplication {
     private void connectToServer() {
         try {
             socket = new Socket("localhost", 5000);
+            socket.setTcpNoDelay(true); // 禁用 Nagle 算法，減少延遲
+            socket.setSoTimeout(0); // 無限等待
+            
             out = new ObjectOutputStream(socket.getOutputStream());
             out.flush();
             in = new ObjectInputStream(socket.getInputStream());
@@ -100,28 +110,40 @@ public class GameClient extends GameApplication {
     private void startNetworkThread() {
         new Thread(() -> {
             try {
-                while (connected) {
-                    Object obj = in.readObject();
-                    
-                    if (obj instanceof PlayerInfo info) {
-                        // 更新其他玩家位置
-                        javafx.application.Platform.runLater(() -> {
-                            updateOtherPlayer(info);
-                        });
-                    } else if (obj instanceof DisconnectMessage disconnectMsg) {
-                        // 移除離線玩家
-                        javafx.application.Platform.runLater(() -> {
-                            removeOtherPlayer(disconnectMsg.playerId);
-                        });
-                    } else if (obj instanceof PlatformInfo platformInfo) {
-                        // 更新平台位置
-                        javafx.application.Platform.runLater(() -> {
-                            updatePlatform(platformInfo);
-                        });
+                while (running && connected) {
+                    try {
+                        Object obj = in.readObject();
+                        
+                        if (obj instanceof PlayerInfo info) {
+                            // 更新其他玩家位置
+                            javafx.application.Platform.runLater(() -> {
+                                updateOtherPlayer(info);
+                            });
+                        } else if (obj instanceof DisconnectMessage disconnectMsg) {
+                            // 移除離線玩家
+                            javafx.application.Platform.runLater(() -> {
+                                removeOtherPlayer(disconnectMsg.playerId);
+                            });
+                        } else if (obj instanceof PlatformInfo platformInfo) {
+                            // 更新平台位置 - 使用平滑移動
+                            javafx.application.Platform.runLater(() -> {
+                                updatePlatformSmooth(platformInfo);
+                            });
+                        }
+                    } catch (EOFException | SocketException e) {
+                        System.err.println("⚠️ Connection lost");
+                        break;
+                    } catch (StreamCorruptedException e) {
+                        System.err.println("⚠️ Stream corrupted, reconnection needed");
+                        break;
                     }
                 }
             } catch (Exception e) {
-                System.err.println("⚠️ Network thread error: " + e.getMessage());
+                if (running) {
+                    System.err.println("⚠️ Network thread error: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            } finally {
                 connected = false;
             }
         }).start();
@@ -129,24 +151,30 @@ public class GameClient extends GameApplication {
 
     private void startPositionSender() {
         new Thread(() -> {
-            while (connected) {
+            while (running) {
                 try {
-                    if (player != null) {
-                        PlayerControl pc = player.getComponent(PlayerControl.class);
-                        PlayerInfo info = new PlayerInfo(
-                            myPlayerId,
-                            toHex(myColor),
-                            player.getX(),
-                            player.getY(),
-                            pc.isCrouching(),
-                            player.getTransformComponent().getScaleY()
-                        );
-                        out.writeObject(info);
-                        out.flush();
+                    if (connected && player != null) {
+                        synchronized (out) {
+                            PlayerControl pc = player.getComponent(PlayerControl.class);
+                            PlayerInfo info = new PlayerInfo(
+                                myPlayerId,
+                                toHex(myColor),
+                                player.getX(),
+                                player.getY(),
+                                pc.isCrouching(),
+                                player.getTransformComponent().getScaleY()
+                            );
+                            out.writeObject(info);
+                            out.flush();
+                            out.reset(); // 清除快取，避免物件重用問題
+                        }
                     }
                     Thread.sleep(50); // 每50ms發送一次
                 } catch (Exception e) {
-                    connected = false;
+                    if (running) {
+                        System.err.println("⚠️ Position sender error: " + e.getMessage());
+                        connected = false;
+                    }
                     break;
                 }
             }
@@ -184,12 +212,15 @@ public class GameClient extends GameApplication {
         }
     }
 
-    private void updatePlatform(PlatformInfo info) {
+    private void updatePlatformSmooth(PlatformInfo info) {
         if (info.platformId >= 0 && info.platformId < platformEntities.size()) {
             Entity platform = platformEntities.get(info.platformId);
             // 只有在不是自己拖曳的平台時才更新
             if (platform != draggedPlatform) {
-                platform.setPosition(info.x, info.y);
+                SmoothPlatformComponent smoothComp = platformSmoothComponents.get(info.platformId);
+                if (smoothComp != null) {
+                    smoothComp.setTargetPosition(info.x, info.y);
+                }
             }
         }
     }
@@ -197,18 +228,16 @@ public class GameClient extends GameApplication {
     private void sendPlatformUpdate(int platformId, double x, double y) {
         if (!connected) return;
         
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastPlatformSendTime < PLATFORM_SYNC_INTERVAL) {
-            return; // 限制發送頻率
-        }
-        lastPlatformSendTime = currentTime;
-        
         try {
-            PlatformInfo info = new PlatformInfo(platformId, x, y);
-            out.writeObject(info);
-            out.flush();
+            synchronized (out) {
+                PlatformInfo info = new PlatformInfo(platformId, x, y);
+                out.writeObject(info);
+                out.flush();
+                out.reset(); // 清除快取
+            }
         } catch (Exception e) {
-            System.err.println("Failed to send platform update: " + e.getMessage());
+            System.err.println("⚠️ Failed to send platform update: " + e.getMessage());
+            connected = false;
         }
     }
 
@@ -297,7 +326,7 @@ public class GameClient extends GameApplication {
                     
                     draggedPlatform.setPosition(newX, newY);
                     
-                    // 發送平台位置更新
+                    // 發送平台位置更新（每幀都發送，伺服器會限流）
                     sendPlatformUpdate(draggedPlatformId, newX, newY);
                 }
             }
@@ -320,12 +349,14 @@ public class GameClient extends GameApplication {
     }
 
     private void cleanup() {
+        running = false;
         connected = false;
         try {
+            Thread.sleep(100); // 等待執行緒結束
             if (out != null) out.close();
             if (in != null) in.close();
             if (socket != null) socket.close();
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -335,7 +366,7 @@ public class GameClient extends GameApplication {
     }
 }
 
-// ========== 平滑移動組件 ==========
+// ========== 平滑移動組件（玩家） ==========
 class SmoothPlayerComponent extends Component {
     private Point2D targetPosition;
     private double targetScaleY = 1.0;
@@ -371,6 +402,47 @@ class SmoothPlayerComponent extends Component {
         double currentScaleY = entity.getTransformComponent().getScaleY();
         double newScaleY = currentScaleY + (targetScaleY - currentScaleY) * SMOOTHING;
         entity.getTransformComponent().setScaleY(newScaleY);
+    }
+}
+
+// ========== 平滑移動組件（平台） ==========
+class SmoothPlatformComponent extends Component {
+    private Point2D targetPosition;
+    private final double SMOOTHING = 0.25; // 平台平滑係數（稍慢一點）
+    private boolean initialized = false;
+
+    public SmoothPlatformComponent() {
+        this.targetPosition = Point2D.ZERO;
+    }
+
+    public void setTargetPosition(double x, double y) {
+        this.targetPosition = new Point2D(x, y);
+    }
+
+    @Override
+    public void onUpdate(double tpf) {
+        if (!initialized) {
+            targetPosition = entity.getPosition();
+            initialized = true;
+            return;
+        }
+
+        if (targetPosition.equals(Point2D.ZERO)) {
+            return;
+        }
+
+        // 使用線性插值平滑移動平台
+        Point2D currentPos = entity.getPosition();
+        double distance = currentPos.distance(targetPosition);
+        
+        // 如果距離太小就直接設定，避免抖動
+        if (distance < 0.5) {
+            entity.setPosition(targetPosition);
+        } else {
+            double newX = currentPos.getX() + (targetPosition.getX() - currentPos.getX()) * SMOOTHING;
+            double newY = currentPos.getY() + (targetPosition.getY() - currentPos.getY()) * SMOOTHING;
+            entity.setPosition(newX, newY);
+        }
     }
 }
 
