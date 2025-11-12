@@ -3,6 +3,10 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 多人平台遊戲伺服器
+ * 管理三個遊戲階段：選擇物件 -> 放置物件 -> 遊戲進行
+ */
 public class GameServer {
 
     private static final int PORT = 5000;
@@ -12,19 +16,39 @@ public class GameServer {
         "#FF00FF", "#00FFFF", "#FFA500", "#800080"
     };
     private static int colorIndex = 0;
+    
+    // 遊戲狀態
+    private static volatile GamePhase currentPhase = GamePhase.SELECTING;
+    private static final Map<String, Integer> playerSelections = new ConcurrentHashMap<>();
+    private static final Map<String, PlatformPlacement> playerPlacements = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> playerScores = new ConcurrentHashMap<>();
+    private static final Set<String> finishedPlayers = ConcurrentHashMap.newKeySet();
+    
+    // 可選擇的物件（每輪隨機大小）
+    private static List<GameObjectInfo> availableObjects = new ArrayList<>();
+    
+    // 計時器
+    private static long gameStartTime = 0;
+    private static final long GAME_DURATION = 60000;
 
     public static void main(String[] args) {
-        System.out.println("🎮 Game Server running on port " + PORT);
+        System.out.println("Game Server running on port " + PORT);
+        
+        // 生成初始物件
+        generateNewObjects();
+        
+        // 啟動遊戲循環監控執行緒
+        startGameLoop();
 
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
                 Socket socket = serverSocket.accept();
-                socket.setTcpNoDelay(true); // 禁用 Nagle 算法
+                socket.setTcpNoDelay(true);
                 
                 String playerId = UUID.randomUUID().toString().substring(0, 8);
                 String color = COLORS[colorIndex++ % COLORS.length];
                 
-                System.out.println("✅ Client connected: " + playerId + " (Color: " + color + ")");
+                System.out.println("Client connected: " + playerId + " (Color: " + color + ")");
 
                 ClientHandler handler = new ClientHandler(socket, playerId, color);
                 clients.put(playerId, handler);
@@ -32,6 +56,118 @@ public class GameServer {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 生成新的可選物件（隨機大小）
+     */
+    private static void generateNewObjects() {
+        availableObjects.clear();
+        Random rand = new Random();
+        
+        // 生成5個不同大小的平台
+        for (int i = 0; i < 5; i++) {
+            int width = 80 + rand.nextInt(150);
+            int height = 15 + rand.nextInt(20);
+            String color = String.format("#%06X", rand.nextInt(0xFFFFFF) | 0x800000);
+            GameObjectInfo obj = new GameObjectInfo(i, width, height, color);
+            availableObjects.add(obj);
+            System.out.println("Generated object " + i + ": " + width + "x" + height + " " + color);
+        }
+        System.out.println("Total objects generated: " + availableObjects.size());
+    }
+    
+    /**
+     * 遊戲循環監控
+     */
+    private static void startGameLoop() {
+        new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(100);
+                    
+                    // 檢查是否所有玩家都選擇了物件
+                    if (currentPhase == GamePhase.SELECTING) {
+                        if (!clients.isEmpty() && playerSelections.size() == clients.size()) {
+                            switchToPlacingPhase();
+                        }
+                    }
+                    // 檢查是否所有玩家都放置了物件
+                    else if (currentPhase == GamePhase.PLACING) {
+                        if (!clients.isEmpty() && playerPlacements.size() == clients.size()) {
+                            switchToPlayingPhase();
+                        }
+                    }
+                    // 檢查遊戲是否結束
+                    else if (currentPhase == GamePhase.PLAYING) {
+                        long elapsed = System.currentTimeMillis() - gameStartTime;
+                        if (elapsed >= GAME_DURATION) {
+                            switchToSelectingPhase();
+                        }
+                    }
+                    
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+    
+    private static void switchToPlacingPhase() {
+        currentPhase = GamePhase.PLACING;
+        System.out.println("Phase changed to PLACING");
+        broadcastPhaseChange(GamePhase.PLACING);
+    }
+    
+    private static void switchToPlayingPhase() {
+        currentPhase = GamePhase.PLAYING;
+        gameStartTime = System.currentTimeMillis();
+        finishedPlayers.clear();
+        System.out.println("Phase changed to PLAYING");
+        broadcastPhaseChange(GamePhase.PLAYING);
+        broadcastAllPlacements();
+    }
+    
+    private static void switchToSelectingPhase() {
+        currentPhase = GamePhase.SELECTING;
+        playerSelections.clear();
+        playerPlacements.clear();
+        generateNewObjects();
+        System.out.println("Phase changed to SELECTING");
+        broadcastPhaseChange(GamePhase.SELECTING);
+        broadcastAvailableObjects();
+        broadcastScores();
+    }
+    
+    private static void broadcastPhaseChange(GamePhase phase) {
+        PhaseChangeMessage msg = new PhaseChangeMessage(phase);
+        for (ClientHandler handler : clients.values()) {
+            handler.sendObject(msg);
+        }
+    }
+    
+    private static void broadcastAvailableObjects() {
+        ObjectListMessage msg = new ObjectListMessage(availableObjects);
+        System.out.println("Broadcasting " + availableObjects.size() + " objects to all clients");
+        for (ClientHandler handler : clients.values()) {
+            handler.sendObject(msg);
+        }
+    }
+    
+    private static void broadcastAllPlacements() {
+        for (Map.Entry<String, PlatformPlacement> entry : playerPlacements.entrySet()) {
+            PlacementMessage msg = new PlacementMessage(entry.getKey(), entry.getValue());
+            for (ClientHandler handler : clients.values()) {
+                handler.sendObject(msg);
+            }
+        }
+    }
+    
+    private static void broadcastScores() {
+        ScoreUpdateMessage msg = new ScoreUpdateMessage(new HashMap<>(playerScores));
+        for (ClientHandler handler : clients.values()) {
+            handler.sendObject(msg);
         }
     }
 
@@ -47,6 +183,7 @@ public class GameServer {
             this.socket = socket;
             this.playerId = playerId;
             this.color = color;
+            playerScores.putIfAbsent(playerId, 0);
         }
 
         @Override
@@ -56,112 +193,117 @@ public class GameServer {
                 out.flush();
                 in = new ObjectInputStream(socket.getInputStream());
 
-                // 發送自己的玩家ID和顏色
+                // 發送初始化訊息
                 InitMessage initMsg = new InitMessage(playerId, color);
-                synchronized (out) {
-                    out.writeObject(initMsg);
-                    out.flush();
+                sendObject(initMsg);
+                
+                // 發送當前遊戲階段
+                sendObject(new PhaseChangeMessage(currentPhase));
+                
+                System.out.println("Current phase: " + currentPhase + ", Available objects: " + availableObjects.size());
+                
+                // 發送可選物件列表（如果在選擇階段）
+                if (currentPhase == GamePhase.SELECTING && !availableObjects.isEmpty()) {
+                    System.out.println("Sending object list to new client");
+                    sendObject(new ObjectListMessage(availableObjects));
                 }
+                
+                // 發送分數
+                sendObject(new ScoreUpdateMessage(new HashMap<>(playerScores)));
 
-                // 發送現有玩家列表
-                synchronized (clients) {
-                    for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
-                        if (!entry.getKey().equals(playerId)) {
-                            // 通知新玩家其他玩家的存在
-                            PlayerInfo existingPlayer = new PlayerInfo(
-                                entry.getKey(), 
-                                entry.getValue().color, 
-                                100, 500, false, 1.0
-                            );
-                            synchronized (out) {
-                                out.writeObject(existingPlayer);
-                                out.flush();
-                            }
-                        }
-                    }
-                }
-
-                // 通知其他玩家新玩家加入
-                PlayerInfo newPlayerInfo = new PlayerInfo(playerId, color, 100, 500, false, 1.0);
-                broadcast(newPlayerInfo, playerId);
-
-                // 接收並廣播玩家位置更新
+                // 接收客戶端訊息
                 while (running) {
                     try {
                         Object obj = in.readObject();
                         
                         if (obj instanceof PlayerInfo info) {
-                            // 確保玩家ID和顏色正確
                             info.playerId = playerId;
                             info.colorHex = color;
-                            
-                            // 廣播給所有其他客戶端
                             broadcast(info, playerId);
-                        } else if (obj instanceof PlatformInfo platformInfo) {
-                            // 廣播平台移動給所有其他客戶端
-                            broadcastPlatform(platformInfo, playerId);
+                        } 
+                        else if (obj instanceof SelectionMessage selectionMsg) {
+                            handleSelection(selectionMsg);
                         }
+                        else if (obj instanceof PlacementMessage placementMsg) {
+                            handlePlacement(placementMsg);
+                        }
+                        else if (obj instanceof FinishMessage finishMsg) {
+                            handleFinish(finishMsg);
+                        }
+                        
                     } catch (EOFException | SocketException e) {
-                        System.out.println("❌ Client disconnected: " + playerId);
+                        System.out.println("Client disconnected: " + playerId);
                         break;
                     } catch (StreamCorruptedException e) {
-                        System.out.println("⚠️ Stream corrupted for client " + playerId);
+                        System.out.println("Stream corrupted for client " + playerId);
                         break;
                     }
                 }
             } catch (Exception e) {
-                System.out.println("⚠️ Error with client " + playerId + ": " + e.getMessage());
+                System.out.println("Error with client " + playerId + ": " + e.getMessage());
             } finally {
                 cleanup();
             }
         }
+        
+        /**
+         * 處理玩家選擇物件
+         */
+        private void handleSelection(SelectionMessage msg) {
+            if (currentPhase == GamePhase.SELECTING) {
+                playerSelections.put(playerId, msg.objectId);
+                System.out.println("Player " + playerId + " selected object " + msg.objectId);
+            }
+        }
+        
+        /**
+         * 處理玩家放置物件
+         */
+        private void handlePlacement(PlacementMessage msg) {
+            if (currentPhase == GamePhase.PLACING) {
+                msg.playerId = playerId;
+                playerPlacements.put(playerId, msg.placement);
+                System.out.println("Player " + playerId + " placed object at (" + 
+                    msg.placement.x + ", " + msg.placement.y + ")");
+            }
+        }
+        
+        /**
+         * 處理玩家完成關卡
+         */
+        private void handleFinish(FinishMessage msg) {
+            if (currentPhase == GamePhase.PLAYING && !finishedPlayers.contains(playerId)) {
+                finishedPlayers.add(playerId);
+                int rank = finishedPlayers.size();
+                
+                // 計算分數：第一名100分，第二名70分，第三名50分，其他30分
+                int score = 0;
+                if (rank == 1) score = 100;
+                else if (rank == 2) score = 70;
+                else if (rank == 3) score = 50;
+                else score = 30;
+                
+                playerScores.put(playerId, playerScores.get(playerId) + score);
+                System.out.println("Player " + playerId + " finished! Rank: " + rank + ", Score: +" + score);
+                
+                broadcastScores();
+            }
+        }
 
         private void broadcast(PlayerInfo info, String excludeId) {
-            List<String> deadClients = new ArrayList<>();
-            
-            synchronized (clients) {
-                for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
-                    if (!entry.getKey().equals(excludeId)) {
-                        ClientHandler handler = entry.getValue();
-                        if (!handler.sendObject(info)) {
-                            deadClients.add(entry.getKey());
-                        }
-                    }
+            for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+                if (!entry.getKey().equals(excludeId)) {
+                    entry.getValue().sendObject(info);
                 }
-            }
-            
-            // 移除死亡連線
-            for (String deadId : deadClients) {
-                clients.remove(deadId);
             }
         }
 
-        private void broadcastPlatform(PlatformInfo platformInfo, String excludeId) {
-            List<String> deadClients = new ArrayList<>();
-            
-            synchronized (clients) {
-                for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
-                    if (!entry.getKey().equals(excludeId)) {
-                        ClientHandler handler = entry.getValue();
-                        if (!handler.sendObject(platformInfo)) {
-                            deadClients.add(entry.getKey());
-                        }
-                    }
-                }
-            }
-            
-            // 移除死亡連線
-            for (String deadId : deadClients) {
-                clients.remove(deadId);
-            }
-        }
-
-        private boolean sendObject(Object obj) {
+        boolean sendObject(Object obj) {
             try {
                 synchronized (out) {
                     out.writeObject(obj);
                     out.flush();
-                    out.reset(); // 清除快取，避免物件重用問題
+                    out.reset();
                 }
                 return true;
             } catch (IOException e) {
@@ -172,13 +314,12 @@ public class GameServer {
         private void cleanup() {
             running = false;
             clients.remove(playerId);
+            playerSelections.remove(playerId);
+            playerPlacements.remove(playerId);
             
-            // 通知其他玩家該玩家離開
             DisconnectMessage disconnectMsg = new DisconnectMessage(playerId);
-            synchronized (clients) {
-                for (ClientHandler handler : clients.values()) {
-                    handler.sendObject(disconnectMsg);
-                }
+            for (ClientHandler handler : clients.values()) {
+                handler.sendObject(disconnectMsg);
             }
             
             try {
@@ -188,8 +329,13 @@ public class GameServer {
             } catch (IOException e) {
                 // 忽略
             }
-            
-            System.out.println("🔌 Client " + playerId + " fully cleaned up");
         }
     }
+}
+
+// 遊戲階段枚舉
+enum GamePhase {
+    SELECTING,  // 選擇物件
+    PLACING,    // 放置物件
+    PLAYING     // 遊戲進行
 }

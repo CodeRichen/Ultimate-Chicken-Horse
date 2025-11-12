@@ -9,72 +9,238 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
 import javafx.geometry.Point2D;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.io.*;
 import java.net.*;
 
+/**
+ * 多人平台遊戲客戶端
+ * 三階段遊戲：選擇物件 -> 放置物件 -> 遊戲競賽
+ */
 public class GameClient extends GameApplication {
 
+    // 遊戲實體
     private Entity player;
     private List<Entity> platformEntities = new ArrayList<>();
-    private Entity draggedPlatform = null;
-    private Point2D dragOffset = Point2D.ZERO;
-    private int draggedPlatformId = -1;
+    private Map<String, Entity> otherPlayers = new HashMap<>();
     
+    // 網路連線
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private String myPlayerId;
     private Color myColor = Color.RED;
-    private Map<String, Entity> otherPlayers = new HashMap<>();
     private volatile boolean connected = false;
     private volatile boolean running = true;
     
-    private Map<Integer, SmoothPlatformComponent> platformSmoothComponents = new HashMap<>();
-    private Map<Integer, Point2D> myPlatformPositions = new HashMap<>();
+    // 遊戲狀態
+    private GamePhase currentPhase = GamePhase.SELECTING;
+    private List<GameObjectInfo> availableObjects = new ArrayList<>();
+    private Integer selectedObjectId = null;
+    private PlatformPlacement myPlacement = null;
+    private Map<String, PlatformPlacement> otherPlacements = new HashMap<>();
+    private Map<String, Integer> playerScores = new HashMap<>();
+    
+    // UI元素
+    private Text phaseText;
+    private Text timerText;
+    private Text scoreText;
+    private List<Entity> objectButtons = new ArrayList<>();
+    private Entity previewPlatform = null;
+    
+    // 固定平台（起點和終點）
+    private Entity startPlatform;
+    private Entity endPlatform;
+    
+    // 遊戲計時
+    private long gameStartTime = 0;
+    private static final long GAME_DURATION = 60000;
+    
+    // 螢幕尺寸
+    private static final int SCREEN_WIDTH = 1920;
+    private static final int SCREEN_HEIGHT = 1080;
 
     @Override
     protected void initSettings(GameSettings settings) {
-        settings.setWidth(800);
-        settings.setHeight(600);
-        settings.setTitle("FXGL Multiplayer Platformer");
+        settings.setWidth(SCREEN_WIDTH);
+        settings.setHeight(SCREEN_HEIGHT);
+        settings.setTitle("Multiplayer Platform Race");
+        settings.setFullScreenAllowed(true);
+        settings.setFullScreenFromStart(false);
     }
 
     @Override
     protected void initGame() {
-        createPlatform(0, 550, 800, 50, Color.DARKGRAY);
-        createPlatform(200, 450, 100, 20, Color.DARKBLUE);
-        createPlatform(400, 350, 100, 20, Color.DARKBLUE);
-        createPlatform(100, 250, 120, 20, Color.DARKGREEN);
-
-        for (int i = 0; i < platformEntities.size(); i++) {
-            SmoothPlatformComponent smoothComp = new SmoothPlatformComponent();
-            platformEntities.get(i).addComponent(smoothComp);
-            platformSmoothComponents.put(i, smoothComp);
-            myPlatformPositions.put(i, platformEntities.get(i).getPosition());
-        }
-
-        connectToServer();
-
+        // 設置背景顏色
+        FXGL.getGameScene().setBackgroundColor(Color.rgb(30, 30, 40));
+        
+        // 創建固定平台
+        createFixedPlatforms();
+        
+        // 先創建玩家（初始隱藏）
         player = FXGL.entityBuilder()
-                .at(100, 500)
-                .view(new Circle(20, myColor))
+                .at(100, 900)
+                .view(new Circle(25, myColor))
                 .with(new PlayerControl(platformEntities))
                 .buildAndAttach();
-
+        player.setVisible(false);
+        
+        // 創建UI
+        createUI();
+        
+        // 連接伺服器（在玩家創建之後）
+        connectToServer();
+        
+        // 啟動網路執行緒
         startNetworkThread();
         startPositionSender();
     }
-
+    
+    /**
+     * 創建固定平台（起點和終點）
+     */
+    private void createFixedPlatforms() {
+        // 起點平台（左下角）
+        startPlatform = createPlatform(50, SCREEN_HEIGHT - 150, 200, 30, Color.GREEN);
+        
+        // 終點平台
+        endPlatform = createPlatform(300, SCREEN_HEIGHT - 150, 200, 30, Color.GOLD);
+        
+        // 添加標籤
+        Text startLabel = new Text("START");
+        startLabel.setFont(Font.font(20));
+        startLabel.setFill(Color.WHITE);
+        FXGL.entityBuilder()
+                .at(110, SCREEN_HEIGHT - 130)
+                .view(startLabel)
+                .buildAndAttach();
+        
+        Text endLabel = new Text("FINISH");
+        endLabel.setFont(Font.font(20));
+        endLabel.setFill(Color.WHITE);
+        FXGL.entityBuilder()
+                .at(360, SCREEN_HEIGHT - 130)
+                .view(endLabel)
+                .buildAndAttach();
+    }
+    
+    /**
+     * 創建UI元素
+     */
+    private void createUI() {
+        // 階段提示文字
+        phaseText = new Text("Phase: SELECTING");
+        phaseText.setFont(Font.font(30));
+        phaseText.setFill(Color.WHITE);
+        FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 150, 50)
+                .view(phaseText)
+                .buildAndAttach();
+        
+        // 計時器文字
+        timerText = new Text("");
+        timerText.setFont(Font.font(25));
+        timerText.setFill(Color.YELLOW);
+        FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 50, 90)
+                .view(timerText)
+                .buildAndAttach();
+        
+        // 分數文字
+        scoreText = new Text("Score: 0");
+        scoreText.setFont(Font.font(20));
+        scoreText.setFill(Color.CYAN);
+        FXGL.entityBuilder()
+                .at(50, 50)
+                .view(scoreText)
+                .buildAndAttach();
+    }
+    
+    /**
+     * 顯示可選擇的物件
+     */
+    private void displayObjectSelection() {
+        // 清除舊的按鈕
+        for (Entity btn : objectButtons) {
+            btn.removeFromWorld();
+        }
+        objectButtons.clear();
+        
+        System.out.println("Displaying " + availableObjects.size() + " objects for selection");
+        
+        // 創建物件選擇按鈕（垂直排列在螢幕中央）
+        int startY = 200;
+        int spacing = 150;
+        
+        for (int i = 0; i < availableObjects.size(); i++) {
+            GameObjectInfo obj = availableObjects.get(i);
+            int yPos = startY + i * spacing;
+            
+            System.out.println("Object " + i + ": " + obj.width + "x" + obj.height + " at " + yPos);
+            
+            // 創建按鈕背景（更大更明顯）
+            Rectangle btnBg = new Rectangle(400, 100, Color.rgb(80, 80, 100));
+            btnBg.setStroke(Color.WHITE);
+            btnBg.setStrokeWidth(2);
+            Entity btnEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 200, yPos)
+                    .view(btnBg)
+                    .buildAndAttach();
+            objectButtons.add(btnEntity);
+            
+            // 創建物件預覽
+            Rectangle objRect = new Rectangle(obj.width, obj.height, Color.web(obj.color));
+            objRect.setStroke(Color.YELLOW);
+            objRect.setStrokeWidth(1);
+            Entity objPreview = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - obj.width / 2, yPos + 50 - obj.height / 2)
+                    .view(objRect)
+                    .buildAndAttach();
+            objectButtons.add(objPreview);
+            
+            // 創建序號標籤
+            Text numLabel = new Text("Platform " + (i + 1));
+            numLabel.setFont(Font.font(20));
+            numLabel.setFill(Color.WHITE);
+            Entity numEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 200 + 10, yPos + 25)
+                    .view(numLabel)
+                    .buildAndAttach();
+            objectButtons.add(numEntity);
+            
+            // 創建尺寸標籤
+            Text sizeLabel = new Text(obj.width + " x " + obj.height);
+            sizeLabel.setFont(Font.font(18));
+            sizeLabel.setFill(Color.LIGHTGREEN);
+            Entity sizeEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 200 + 10, yPos + 80)
+                    .view(sizeLabel)
+                    .buildAndAttach();
+            objectButtons.add(sizeEntity);
+        }
+    }
+    
+    /**
+     * 清除物件選擇UI
+     */
+    private void clearObjectSelection() {
+        System.out.println("Clearing " + objectButtons.size() + " selection UI elements");
+        for (Entity btn : objectButtons) {
+            btn.removeFromWorld();
+        }
+        objectButtons.clear();
+    }
+    
+    /**
+     * 連接伺服器
+     */
     private void connectToServer() {
         try {
             socket = new Socket("localhost", 5000);
             socket.setTcpNoDelay(true);
-            socket.setSoTimeout(0);
             
             out = new ObjectOutputStream(socket.getOutputStream());
             out.flush();
@@ -87,67 +253,88 @@ public class GameClient extends GameApplication {
                 connected = true;
                 System.out.println("Connected as " + myPlayerId + " with color " + initMsg.colorHex);
                 
-                if (player != null) {
+                // 更新玩家顏色
+                if (player != null && player.getViewComponent() != null && 
+                    !player.getViewComponent().getChildren().isEmpty()) {
                     Circle circle = (Circle) player.getViewComponent().getChildren().get(0);
                     circle.setFill(myColor);
                 }
             }
         } catch (Exception e) {
-            System.err.println("Failed to connect to server: " + e.getMessage());
+            System.err.println("Failed to connect: " + e.getMessage());
+            e.printStackTrace();
             connected = false;
         }
     }
-
+    
+    /**
+     * 網路接收執行緒
+     */
     private void startNetworkThread() {
         new Thread(() -> {
             try {
                 while (running && connected) {
-                    try {
-                        Object obj = in.readObject();
-                        
-                        if (obj instanceof PlayerInfo info) {
-                            javafx.application.Platform.runLater(() -> {
-                                updateOtherPlayer(info);
-                            });
-                        } else if (obj instanceof DisconnectMessage disconnectMsg) {
-                            javafx.application.Platform.runLater(() -> {
-                                removeOtherPlayer(disconnectMsg.playerId);
-                            });
-                        } else if (obj instanceof PlatformInfo platformInfo) {
-                            javafx.application.Platform.runLater(() -> {
-                                updatePlatformSmooth(platformInfo);
-                            });
-                        }
-                    } catch (EOFException | SocketException e) {
-                        System.err.println("Connection lost");
-                        break;
-                    } catch (StreamCorruptedException e) {
-                        System.err.println("Stream corrupted, reconnection needed");
-                        break;
+                    Object obj = in.readObject();
+                    
+                    if (obj instanceof PhaseChangeMessage phaseMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            handlePhaseChange(phaseMsg.phase);
+                        });
+                    }
+                    else if (obj instanceof ObjectListMessage objListMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            availableObjects = objListMsg.objects;
+                            System.out.println("Received object list with " + availableObjects.size() + " objects");
+                            if (currentPhase == GamePhase.SELECTING) {
+                                displayObjectSelection();
+                            }
+                        });
+                    }
+                    else if (obj instanceof PlacementMessage placementMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            handlePlacement(placementMsg);
+                        });
+                    }
+                    else if (obj instanceof PlayerInfo info) {
+                        javafx.application.Platform.runLater(() -> {
+                            updateOtherPlayer(info);
+                        });
+                    }
+                    else if (obj instanceof DisconnectMessage disconnectMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            removeOtherPlayer(disconnectMsg.playerId);
+                        });
+                    }
+                    else if (obj instanceof ScoreUpdateMessage scoreMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            playerScores = scoreMsg.scores;
+                            updateScoreDisplay();
+                        });
                     }
                 }
             } catch (Exception e) {
                 if (running) {
-                    System.err.println("Network thread error: " + e.getMessage());
+                    System.err.println("Network error: " + e.getMessage());
                 }
             } finally {
                 connected = false;
             }
         }).start();
     }
-
+    
+    /**
+     * 位置發送執行緒
+     */
     private void startPositionSender() {
         new Thread(() -> {
             while (running) {
                 try {
-                    if (connected && player != null) {
+                    if (connected && currentPhase == GamePhase.PLAYING && player.isVisible()) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
                             PlayerInfo info = new PlayerInfo(
-                                myPlayerId,
-                                toHex(myColor),
-                                player.getX(),
-                                player.getY(),
+                                myPlayerId, toHex(myColor),
+                                player.getX(), player.getY(),
                                 pc.isCrouching(),
                                 player.getTransformComponent().getScaleY()
                             );
@@ -159,7 +346,6 @@ public class GameClient extends GameApplication {
                     Thread.sleep(50);
                 } catch (Exception e) {
                     if (running) {
-                        System.err.println("Position sender error: " + e.getMessage());
                         connected = false;
                     }
                     break;
@@ -167,13 +353,98 @@ public class GameClient extends GameApplication {
             }
         }).start();
     }
-
+    
+    /**
+     * 處理階段變更
+     */
+    private void handlePhaseChange(GamePhase newPhase) {
+        System.out.println("Phase changed to: " + newPhase);
+        currentPhase = newPhase;
+        
+        switch (newPhase) {
+            case SELECTING:
+                phaseText.setText("Phase: SELECT YOUR PLATFORM");
+                player.setVisible(false);
+                selectedObjectId = null;
+                myPlacement = null;
+                
+                // 清除所有動態平台
+                for (int i = platformEntities.size() - 1; i >= 0; i--) {
+                    Entity p = platformEntities.get(i);
+                    if (p != startPlatform && p != endPlatform) {
+                        p.removeFromWorld();
+                        platformEntities.remove(i);
+                    }
+                }
+                otherPlacements.clear();
+                
+                if (previewPlatform != null) {
+                    previewPlatform.removeFromWorld();
+                    previewPlatform = null;
+                }
+                
+                // 確保顯示物件選擇（如果已經收到物件列表）
+                if (!availableObjects.isEmpty()) {
+                    System.out.println("Displaying objects immediately");
+                    displayObjectSelection();
+                } else {
+                    System.out.println("Waiting for object list from server");
+                }
+                break;
+                
+            case PLACING:
+                phaseText.setText("Phase: PLACE YOUR PLATFORM");
+                clearObjectSelection();
+                break;
+                
+            case PLAYING:
+                phaseText.setText("Phase: RACE TO FINISH!");
+                if (previewPlatform != null) {
+                    previewPlatform.removeFromWorld();
+                    previewPlatform = null;
+                }
+                
+                // 創建所有玩家放置的平台
+                for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
+                    PlatformPlacement p = entry.getValue();
+                    createPlatform(p.x, p.y, p.width, p.height, Color.web(p.color));
+                }
+                
+                // 創建自己的平台
+                if (myPlacement != null) {
+                    createPlatform(myPlacement.x, myPlacement.y, myPlacement.width, 
+                                 myPlacement.height, Color.web(myPlacement.color));
+                }
+                
+                player.setVisible(true);
+                player.setPosition(100, 900);
+                gameStartTime = System.currentTimeMillis();
+                break;
+        }
+    }
+    
+    /**
+     * 處理其他玩家放置的平台
+     */
+    private void handlePlacement(PlacementMessage msg) {
+        otherPlacements.put(msg.playerId, msg.placement);
+        
+        // 如果在遊戲階段，創建所有玩家的平台（包括自己的）
+        if (currentPhase == GamePhase.PLAYING) {
+            PlatformPlacement p = msg.placement;
+            createPlatform(p.x, p.y, p.width, p.height, Color.web(p.color));
+        }
+    }
+    
+    /**
+     * 更新其他玩家位置
+     */
     private void updateOtherPlayer(PlayerInfo info) {
         Entity otherPlayer = otherPlayers.get(info.playerId);
         
-        if (otherPlayer == null) {
+        if (otherPlayer == null && currentPhase == GamePhase.PLAYING) {
             Color playerColor = Color.web(info.colorHex);
-            Circle circle = new Circle(20, playerColor);
+            Circle circle = new Circle(25, playerColor);
             SmoothPlayerComponent smoothComponent = new SmoothPlayerComponent();
             otherPlayer = FXGL.entityBuilder()
                     .at(info.x, info.y)
@@ -181,61 +452,34 @@ public class GameClient extends GameApplication {
                     .with(smoothComponent)
                     .buildAndAttach();
             otherPlayers.put(info.playerId, otherPlayer);
-            System.out.println("New player joined: " + info.playerId);
-        } else {
+        } else if (otherPlayer != null) {
             SmoothPlayerComponent smoothComponent = otherPlayer.getComponent(SmoothPlayerComponent.class);
             smoothComponent.setTargetPosition(info.x, info.y);
             smoothComponent.setTargetScaleY(info.scaleY);
         }
     }
-
+    
+    /**
+     * 移除離線玩家
+     */
     private void removeOtherPlayer(String playerId) {
         Entity player = otherPlayers.remove(playerId);
         if (player != null) {
             player.removeFromWorld();
-            System.out.println("Player left: " + playerId);
         }
     }
-
-    private void updatePlatformSmooth(PlatformInfo info) {
-        if (info.platformId >= 0 && info.platformId < platformEntities.size()) {
-            Entity platform = platformEntities.get(info.platformId);
-            
-            if (draggedPlatformId == info.platformId) {
-                return;
-            }
-            
-            SmoothPlatformComponent smoothComp = platformSmoothComponents.get(info.platformId);
-            if (smoothComp != null) {
-                smoothComp.setTargetPosition(info.x, info.y);
-                myPlatformPositions.put(info.platformId, new Point2D(info.x, info.y));
-            }
-        }
+    
+    /**
+     * 更新分數顯示
+     */
+    private void updateScoreDisplay() {
+        Integer myScore = playerScores.getOrDefault(myPlayerId, 0);
+        scoreText.setText("Score: " + myScore);
     }
-
-    private void sendPlatformUpdate(int platformId, double x, double y) {
-        if (!connected) return;
-        
-        try {
-            synchronized (out) {
-                PlatformInfo info = new PlatformInfo(platformId, x, y);
-                out.writeObject(info);
-                out.flush();
-                out.reset();
-            }
-        } catch (Exception e) {
-            System.err.println("Failed to send platform update: " + e.getMessage());
-            connected = false;
-        }
-    }
-
-    private String toHex(Color color) {
-        return String.format("#%02X%02X%02X",
-            (int)(color.getRed() * 255),
-            (int)(color.getGreen() * 255),
-            (int)(color.getBlue() * 255));
-    }
-
+    
+    /**
+     * 創建平台
+     */
     private Entity createPlatform(double x, double y, double width, double height, Color color) {
         Rectangle rect = new Rectangle(width, height, color);
         Entity platform = FXGL.entityBuilder()
@@ -247,105 +491,268 @@ public class GameClient extends GameApplication {
         platformEntities.add(platform);
         return platform;
     }
+    
+    private String toHex(Color color) {
+        return String.format("#%02X%02X%02X",
+            (int)(color.getRed() * 255),
+            (int)(color.getGreen() * 255),
+            (int)(color.getBlue() * 255));
+    }
 
     @Override
     protected void initInput() {
-        FXGL.getInput().addAction(new UserAction("Move Left") {
+        // 玩家移動（僅在遊戲階段）
+        FXGL.getInput().addAction(new UserAction("Move Left A") {
             @Override
             protected void onAction() {
-                player.getComponent(PlayerControl.class).moveLeft();
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).moveLeft();
+                }
+            }
+        }, KeyCode.A);
+        
+        FXGL.getInput().addAction(new UserAction("Move Left Arrow") {
+            @Override
+            protected void onAction() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).moveLeft();
+                }
             }
         }, KeyCode.LEFT);
 
-        FXGL.getInput().addAction(new UserAction("Move Right") {
+        FXGL.getInput().addAction(new UserAction("Move Right D") {
             @Override
             protected void onAction() {
-                player.getComponent(PlayerControl.class).moveRight();
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).moveRight();
+                }
+            }
+        }, KeyCode.D);
+        
+        FXGL.getInput().addAction(new UserAction("Move Right Arrow") {
+            @Override
+            protected void onAction() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).moveRight();
+                }
             }
         }, KeyCode.RIGHT);
 
-        FXGL.getInput().addAction(new UserAction("Jump") {
+        FXGL.getInput().addAction(new UserAction("Jump W") {
             @Override
             protected void onActionBegin() {
-                player.getComponent(PlayerControl.class).jump();
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).jump();
+                }
+            }
+        }, KeyCode.W);
+        
+        FXGL.getInput().addAction(new UserAction("Jump Up") {
+            @Override
+            protected void onActionBegin() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).jump();
+                }
             }
         }, KeyCode.UP);
-
-        FXGL.getInput().addAction(new UserAction("Crouch") {
+        
+        FXGL.getInput().addAction(new UserAction("Jump Space") {
             @Override
             protected void onActionBegin() {
-                player.getComponent(PlayerControl.class).crouch(true);
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).jump();
+                }
             }
+        }, KeyCode.SPACE);
 
+        FXGL.getInput().addAction(new UserAction("Crouch S") {
+            @Override
+            protected void onActionBegin() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).crouch(true);
+                }
+            }
             @Override
             protected void onActionEnd() {
-                player.getComponent(PlayerControl.class).crouch(false);
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).crouch(false);
+                }
+            }
+        }, KeyCode.S);
+        
+        FXGL.getInput().addAction(new UserAction("Crouch Down") {
+            @Override
+            protected void onActionBegin() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).crouch(true);
+                }
+            }
+            @Override
+            protected void onActionEnd() {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    player.getComponent(PlayerControl.class).crouch(false);
+                }
             }
         }, KeyCode.DOWN);
 
-        FXGL.getInput().addAction(new UserAction("Drag Platform") {
+        // 滑鼠點擊（選擇或放置）
+        FXGL.getInput().addAction(new UserAction("Click") {
             @Override
             protected void onActionBegin() {
                 Point2D mousePos = FXGL.getInput().getMousePositionWorld();
                 
-                for (int i = 0; i < platformEntities.size(); i++) {
-                    Entity platform = platformEntities.get(i);
-                    PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-                    if (pc.containsPoint(mousePos.getX(), mousePos.getY())) {
-                        draggedPlatform = platform;
-                        draggedPlatformId = i;
-                        dragOffset = new Point2D(
-                            mousePos.getX() - platform.getX(),
-                            mousePos.getY() - platform.getY()
-                        );
-                        
-                        SmoothPlatformComponent smoothComp = platformSmoothComponents.get(i);
-                        if (smoothComp != null) {
-                            smoothComp.disable();
-                        }
-                        break;
-                    }
+                // 選擇階段：點擊選擇物件
+                if (currentPhase == GamePhase.SELECTING && selectedObjectId == null) {
+                    handleObjectSelection(mousePos);
                 }
-            }
-
-            @Override
-            protected void onAction() {
-                if (draggedPlatform != null) {
-                    Point2D mousePos = FXGL.getInput().getMousePositionWorld();
-                    double newX = mousePos.getX() - dragOffset.getX();
-                    double newY = mousePos.getY() - dragOffset.getY();
-                    
-                    draggedPlatform.setPosition(newX, newY);
-                    myPlatformPositions.put(draggedPlatformId, new Point2D(newX, newY));
-                    
-                    sendPlatformUpdate(draggedPlatformId, newX, newY);
+                // 放置階段：點擊放置物件
+                else if (currentPhase == GamePhase.PLACING && myPlacement == null && selectedObjectId != null) {
+                    handleObjectPlacement(mousePos);
                 }
-            }
-
-            @Override
-            protected void onActionEnd() {
-                if (draggedPlatformId != -1) {
-                    SmoothPlatformComponent smoothComp = platformSmoothComponents.get(draggedPlatformId);
-                    if (smoothComp != null) {
-                        Point2D finalPos = draggedPlatform.getPosition();
-                        smoothComp.setTargetPosition(finalPos.getX(), finalPos.getY());
-                        smoothComp.enable();
-                    }
-                }
-                draggedPlatform = null;
-                draggedPlatformId = -1;
             }
         }, MouseButton.PRIMARY);
-
+        
+        // 退出
         FXGL.getInput().addAction(new UserAction("Quit") {
             @Override
             protected void onActionBegin() {
                 cleanup();
                 FXGL.getGameController().exit();
             }
-        }, KeyCode.Q);
+        }, KeyCode.ESCAPE);
     }
-
+    
+    /**
+     * 處理物件選擇
+     */
+    private void handleObjectSelection(Point2D mousePos) {
+        int startY = 200;
+        int spacing = 150;
+        
+        for (int i = 0; i < availableObjects.size(); i++) {
+            GameObjectInfo obj = availableObjects.get(i);
+            int yPos = startY + i * spacing;
+            
+            // 按鈕範圍（固定400x100）
+            double btnLeft = SCREEN_WIDTH / 2 - 200.0;
+            double btnRight = SCREEN_WIDTH / 2 + 200.0;
+            double btnTop = yPos;
+            double btnBottom = yPos + 100;
+            
+            System.out.println("Checking click at (" + mousePos.getX() + ", " + mousePos.getY() + 
+                             ") against button " + i + " [" + btnLeft + "-" + btnRight + ", " + btnTop + "-" + btnBottom + "]");
+            
+            if (mousePos.getX() >= btnLeft && mousePos.getX() <= btnRight &&
+                mousePos.getY() >= btnTop && mousePos.getY() <= btnBottom) {
+                
+                selectedObjectId = obj.id;
+                System.out.println("Selected object: " + obj.id + " (Size: " + obj.width + "x" + obj.height + ")");
+                
+                // 發送選擇訊息給伺服器
+                try {
+                    synchronized (out) {
+                        out.writeObject(new SelectionMessage(myPlayerId, obj.id));
+                        out.flush();
+                        out.reset();
+                    }
+                } catch (Exception e) {
+                    System.err.println("Failed to send selection: " + e.getMessage());
+                }
+                
+                // 清除選擇界面
+                clearObjectSelection();
+                
+                // 顯示等待訊息
+                phaseText.setText("Waiting for other players...");
+                break;
+            }
+        }
+    }
+    
+    /**
+     * 處理物件放置
+     */
+    private void handleObjectPlacement(Point2D mousePos) {
+        GameObjectInfo selectedObj = null;
+        for (GameObjectInfo obj : availableObjects) {
+            if (obj.id == selectedObjectId) {
+                selectedObj = obj;
+                break;
+            }
+        }
+        
+        if (selectedObj != null) {
+            double x = mousePos.getX() - selectedObj.width / 2.0;
+            double y = mousePos.getY() - selectedObj.height / 2.0;
+            
+            myPlacement = new PlatformPlacement(
+                selectedObj.id, x, y,
+                selectedObj.width, selectedObj.height,
+                selectedObj.color
+            );
+            
+            // 發送放置訊息給伺服器
+            try {
+                synchronized (out) {
+                    out.writeObject(new PlacementMessage(myPlayerId, myPlacement));
+                    out.flush();
+                    out.reset();
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to send placement: " + e.getMessage());
+            }
+            
+            // 創建預覽平台
+            if (previewPlatform != null) {
+                previewPlatform.removeFromWorld();
+            }
+            previewPlatform = createPlatform(x, y, selectedObj.width, selectedObj.height, 
+                                            Color.web(selectedObj.color));
+        }
+    }
+    
+    @Override
+    protected void onUpdate(double tpf) {
+        // 更新計時器
+        if (currentPhase == GamePhase.PLAYING && gameStartTime > 0) {
+            long elapsed = System.currentTimeMillis() - gameStartTime;
+            long remaining = GAME_DURATION - elapsed;
+            
+            if (remaining > 0) {
+                timerText.setText("Time: " + (remaining / 1000) + "s");
+            } else {
+                timerText.setText("Time: 0s");
+            }
+        } else {
+            timerText.setText("");
+        }
+        
+        // 檢查玩家是否到達終點
+        if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+            double playerX = player.getX();
+            double playerY = player.getY();
+            double endX = endPlatform.getX();
+            double endY = endPlatform.getY();
+            
+            // 檢查玩家是否在終點平台上
+            if (playerX >= endX && playerX <= endX + 200 &&
+                playerY >= endY - 50 && playerY <= endY + 30) {
+                
+                // 發送完成訊息
+                try {
+                    synchronized (out) {
+                        out.writeObject(new FinishMessage(myPlayerId));
+                        out.flush();
+                        out.reset();
+                    }
+                    player.setVisible(false); // 隱藏玩家，表示已完成
+                } catch (Exception e) {
+                    System.err.println("Failed to send finish message: " + e.getMessage());
+                }
+            }
+        }
+    }
+    
     private void cleanup() {
         running = false;
         connected = false;
@@ -364,6 +771,7 @@ public class GameClient extends GameApplication {
     }
 }
 
+// 平滑移動組件（其他玩家）
 class SmoothPlayerComponent extends Component {
     private Point2D targetPosition;
     private double targetScaleY = 1.0;
@@ -400,58 +808,7 @@ class SmoothPlayerComponent extends Component {
     }
 }
 
-class SmoothPlatformComponent extends Component {
-    private Point2D targetPosition;
-    private final double SMOOTHING = 0.25;
-    private boolean initialized = false;
-    private boolean enabled = true;
-
-    public SmoothPlatformComponent() {
-        this.targetPosition = Point2D.ZERO;
-    }
-
-    public void setTargetPosition(double x, double y) {
-        this.targetPosition = new Point2D(x, y);
-    }
-
-    public void disable() {
-        enabled = false;
-    }
-
-    public void enable() {
-        enabled = true;
-        targetPosition = entity.getPosition();
-    }
-
-    @Override
-    public void onUpdate(double tpf) {
-        if (!enabled) {
-            return;
-        }
-
-        if (!initialized) {
-            targetPosition = entity.getPosition();
-            initialized = true;
-            return;
-        }
-
-        if (targetPosition.equals(Point2D.ZERO)) {
-            return;
-        }
-
-        Point2D currentPos = entity.getPosition();
-        double distance = currentPos.distance(targetPosition);
-        
-        if (distance < 0.5) {
-            entity.setPosition(targetPosition);
-        } else {
-            double newX = currentPos.getX() + (targetPosition.getX() - currentPos.getX()) * SMOOTHING;
-            double newY = currentPos.getY() + (targetPosition.getY() - currentPos.getY()) * SMOOTHING;
-            entity.setPosition(newX, newY);
-        }
-    }
-}
-
+// 平台組件
 class PlatformComponent extends Component {
     private double width;
     private double height;
@@ -469,15 +826,9 @@ class PlatformComponent extends Component {
         return height;
     }
 
-    public boolean containsPoint(double x, double y) {
-        double left = entity.getX();
-        double right = entity.getX() + width;
-        double top = entity.getY();
-        double bottom = entity.getY() + height;
-        
-        return x >= left && x <= right && y >= top && y <= bottom;
-    }
-
+    /**
+     * 檢查碰撞
+     */
     public CollisionInfo checkCollision(double playerX, double playerY, double radius, double velocityY) {
         double platformLeft = entity.getX();
         double platformRight = entity.getX() + width;
@@ -498,6 +849,7 @@ class PlatformComponent extends Component {
             return new CollisionInfo(false, CollisionSide.NONE);
         }
 
+        // 計算重疊量
         double overlapLeft = playerRight - platformLeft;
         double overlapRight = platformRight - playerLeft;
         double overlapTop = playerBottom - platformTop;
@@ -508,13 +860,14 @@ class PlatformComponent extends Component {
 
         CollisionSide side = CollisionSide.NONE;
         
+        // 根據最小重疊和速度方向判斷碰撞面
         if (minOverlap == overlapTop && velocityY >= 0) {
             side = CollisionSide.TOP;
         } else if (minOverlap == overlapBottom && velocityY <= 0) {
             side = CollisionSide.BOTTOM;
-        } else if (minOverlap == overlapLeft && velocityY < 5) {
+        } else if (minOverlap == overlapLeft && Math.abs(velocityY) < 5) {
             side = CollisionSide.LEFT;
-        } else if (minOverlap == overlapRight && velocityY < 5) {
+        } else if (minOverlap == overlapRight && Math.abs(velocityY) < 5) {
             side = CollisionSide.RIGHT;
         }
 
@@ -536,21 +889,22 @@ enum CollisionSide {
     NONE, TOP, BOTTOM, LEFT, RIGHT
 }
 
+// 玩家控制組件
 class PlayerControl extends Component {
-    private double speed = 5.0;
+    private double speed = 8.0;
     private double velocityX = 0;
     private double velocityY = 0;
-    private double jumpStrength = 15.0;
-    private double gravity = 0.8;
+    private double jumpStrength = 20.0;
+    private double gravity = 1.0;
     private boolean onGround = false;
     private boolean crouching = false;
     private List<Entity> platforms;
-    private double playerRadius = 20;
+    private double playerRadius = 25;
     
-    private final double LEFT_BOUNDARY = 20;
-    private final double RIGHT_BOUNDARY = 780;
-    private final double TOP_BOUNDARY = 20;
-    private final double MAX_VELOCITY_Y = 20;
+    private final double LEFT_BOUNDARY = playerRadius;
+    private final double RIGHT_BOUNDARY = 1920 - playerRadius;
+    private final double TOP_BOUNDARY = playerRadius;
+    private final double MAX_VELOCITY_Y = 25;
 
     public PlayerControl(List<Entity> platforms) {
         this.platforms = platforms;
@@ -558,43 +912,39 @@ class PlayerControl extends Component {
 
     @Override
     public void onUpdate(double tpf) {
+        // 應用重力
         velocityY += gravity;
         
-        if (velocityY > MAX_VELOCITY_Y) {
-            velocityY = MAX_VELOCITY_Y;
-        }
-        if (velocityY < -MAX_VELOCITY_Y) {
-            velocityY = -MAX_VELOCITY_Y;
-        }
+        // 限制最大速度
+        if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
+        if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
         
-        double newX = entity.getX() + velocityX;
-        double newY = entity.getY() + velocityY;
-        
-        entity.setX(newX);
-        entity.setY(newY);
+        // 更新位置
+        entity.setX(entity.getX() + velocityX);
+        entity.setY(entity.getY() + velocityY);
         
         onGround = false;
         
+        // 檢查與所有平台的碰撞
         for (Entity platform : platforms) {
+            // 確保平台有 PlatformComponent
+            if (!platform.hasComponent(PlatformComponent.class)) {
+                continue;
+            }
+            
             PlatformComponent pc = platform.getComponent(PlatformComponent.class);
             CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), playerRadius, velocityY);
             
             if (collision.collided) {
                 switch (collision.side) {
                     case TOP:
-                        double platformTop = platform.getY();
-                        entity.setY(platformTop - playerRadius);
-                        if (velocityY > 0) {
-                            velocityY = 0;
-                        }
+                        entity.setY(platform.getY() - playerRadius);
+                        if (velocityY > 0) velocityY = 0;
                         onGround = true;
                         break;
                     case BOTTOM:
-                        double platformBottom = platform.getY() + pc.getHeight();
-                        entity.setY(platformBottom + playerRadius);
-                        if (velocityY < 0) {
-                            velocityY = 0;
-                        }
+                        entity.setY(platform.getY() + pc.getHeight() + playerRadius);
+                        if (velocityY < 0) velocityY = 0;
                         break;
                     case LEFT:
                         entity.setX(platform.getX() - playerRadius);
@@ -608,6 +958,7 @@ class PlayerControl extends Component {
             }
         }
         
+        // 邊界檢查
         if (entity.getX() < LEFT_BOUNDARY) {
             entity.setX(LEFT_BOUNDARY);
             velocityX = 0;
@@ -621,12 +972,14 @@ class PlayerControl extends Component {
             velocityY = 0;
         }
         
-        if (entity.getY() > 600) {
-            entity.setY(500);
+        // 掉出螢幕底部則重置到起點
+        if (entity.getY() > 1080) {
+            entity.setPosition(100, 900);
             velocityY = 0;
-            onGround = true;
+            velocityX = 0;
         }
         
+        // 重置水平速度
         velocityX = 0;
     }
 
