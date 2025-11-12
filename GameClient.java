@@ -50,6 +50,13 @@ public class GameClient extends GameApplication {
     private Text scoreText;
     private List<Entity> objectButtons = new ArrayList<>();
     private Entity previewPlatform = null;
+    private Entity finishButton = null;
+    
+    // 拖曳和旋轉狀態
+    private boolean isDragging = false;
+    private Point2D dragOffset = Point2D.ZERO;
+    private double currentRotation = 0;
+    private GameObjectInfo selectedObj = null;
     
     // 固定平台（起點和終點）
     private Entity startPlatform;
@@ -62,6 +69,9 @@ public class GameClient extends GameApplication {
     // 螢幕尺寸
     private static final int SCREEN_WIDTH = 1920;
     private static final int SCREEN_HEIGHT = 1080;
+    
+    // 完成標記
+    private boolean hasFinished = false;
 
     @Override
     protected void initSettings(GameSettings settings) {
@@ -235,6 +245,43 @@ public class GameClient extends GameApplication {
     }
     
     /**
+     * 顯示完成按鈕
+     */
+    private void showFinishButton() {
+        if (finishButton != null) {
+            finishButton.removeFromWorld();
+        }
+        
+        Rectangle btnBg = new Rectangle(200, 60, Color.rgb(50, 200, 50));
+        btnBg.setStroke(Color.WHITE);
+        btnBg.setStrokeWidth(3);
+        
+        Text btnText = new Text("FINISH");
+        btnText.setFont(Font.font(24));
+        btnText.setFill(Color.WHITE);
+        
+        finishButton = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 100)
+                .view(btnBg)
+                .buildAndAttach();
+        
+        FXGL.entityBuilder()
+                .at(SCREEN_WIDTH - 200, SCREEN_HEIGHT - 62)
+                .view(btnText)
+                .buildAndAttach();
+    }
+    
+    /**
+     * 隱藏完成按鈕
+     */
+    private void hideFinishButton() {
+        if (finishButton != null) {
+            finishButton.removeFromWorld();
+            finishButton = null;
+        }
+    }
+    
+    /**
      * 連接伺服器
      */
     private void connectToServer() {
@@ -329,7 +376,7 @@ public class GameClient extends GameApplication {
         new Thread(() -> {
             while (running) {
                 try {
-                    if (connected && currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                    if (connected && currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
                             PlayerInfo info = new PlayerInfo(
@@ -366,7 +413,12 @@ public class GameClient extends GameApplication {
                 phaseText.setText("Phase: SELECT YOUR PLATFORM");
                 player.setVisible(false);
                 selectedObjectId = null;
+                selectedObj = null;
                 myPlacement = null;
+                currentRotation = 0;
+                isDragging = false;
+                hasFinished = false;
+                hideFinishButton();
                 
                 // 清除所有動態平台
                 for (int i = platformEntities.size() - 1; i >= 0; i--) {
@@ -393,12 +445,14 @@ public class GameClient extends GameApplication {
                 break;
                 
             case PLACING:
-                phaseText.setText("Phase: PLACE YOUR PLATFORM");
+                phaseText.setText("Phase: DRAG & ROTATE (Q/E), THEN FINISH");
                 clearObjectSelection();
+                showFinishButton();
                 break;
                 
             case PLAYING:
                 phaseText.setText("Phase: RACE TO FINISH!");
+                hideFinishButton();
                 if (previewPlatform != null) {
                     previewPlatform.removeFromWorld();
                     previewPlatform = null;
@@ -407,13 +461,13 @@ public class GameClient extends GameApplication {
                 // 創建所有玩家放置的平台
                 for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
                     PlatformPlacement p = entry.getValue();
-                    createPlatform(p.x, p.y, p.width, p.height, Color.web(p.color));
+                    createPlatformWithRotation(p.x, p.y, p.width, p.height, Color.web(p.color), p.rotation);
                 }
                 
                 // 創建自己的平台
                 if (myPlacement != null) {
-                    createPlatform(myPlacement.x, myPlacement.y, myPlacement.width, 
-                                 myPlacement.height, Color.web(myPlacement.color));
+                    createPlatformWithRotation(myPlacement.x, myPlacement.y, myPlacement.width, 
+                                 myPlacement.height, Color.web(myPlacement.color), myPlacement.rotation);
                 }
                 
                 player.setVisible(true);
@@ -432,7 +486,7 @@ public class GameClient extends GameApplication {
         // 如果在遊戲階段，創建所有玩家的平台（包括自己的）
         if (currentPhase == GamePhase.PLAYING) {
             PlatformPlacement p = msg.placement;
-            createPlatform(p.x, p.y, p.width, p.height, Color.web(p.color));
+            createPlatformWithRotation(p.x, p.y, p.width, p.height, Color.web(p.color), p.rotation);
         }
     }
     
@@ -492,6 +546,22 @@ public class GameClient extends GameApplication {
         return platform;
     }
     
+    /**
+     * 創建帶旋轉的平台
+     */
+    private Entity createPlatformWithRotation(double x, double y, double width, double height, Color color, double rotation) {
+        Rectangle rect = new Rectangle(width, height, color);
+        Entity platform = FXGL.entityBuilder()
+                .at(x, y)
+                .view(rect)
+                .with(new PlatformComponent(width, height))
+                .buildAndAttach();
+        
+        platform.setRotation(rotation);
+        platformEntities.add(platform);
+        return platform;
+    }
+    
     private String toHex(Color color) {
         return String.format("#%02X%02X%02X",
             (int)(color.getRed() * 255),
@@ -505,7 +575,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Move Left A") {
             @Override
             protected void onAction() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).moveLeft();
                 }
             }
@@ -514,7 +584,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Move Left Arrow") {
             @Override
             protected void onAction() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).moveLeft();
                 }
             }
@@ -523,7 +593,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Move Right D") {
             @Override
             protected void onAction() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).moveRight();
                 }
             }
@@ -532,7 +602,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Move Right Arrow") {
             @Override
             protected void onAction() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).moveRight();
                 }
             }
@@ -541,7 +611,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Jump W") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).jump();
                 }
             }
@@ -550,7 +620,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Jump Up") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).jump();
                 }
             }
@@ -559,7 +629,7 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Jump Space") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).jump();
                 }
             }
@@ -568,13 +638,13 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Crouch S") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).crouch(true);
                 }
             }
             @Override
             protected void onActionEnd() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).crouch(false);
                 }
             }
@@ -583,19 +653,40 @@ public class GameClient extends GameApplication {
         FXGL.getInput().addAction(new UserAction("Crouch Down") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).crouch(true);
                 }
             }
             @Override
             protected void onActionEnd() {
-                if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+                if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
                     player.getComponent(PlayerControl.class).crouch(false);
                 }
             }
         }, KeyCode.DOWN);
 
-        // 滑鼠點擊（選擇或放置）
+        // 旋轉物件（放置階段）
+        FXGL.getInput().addAction(new UserAction("Rotate Left") {
+            @Override
+            protected void onActionBegin() {
+                if (currentPhase == GamePhase.PLACING && previewPlatform != null) {
+                    currentRotation -= 15;
+                    previewPlatform.setRotation(currentRotation);
+                }
+            }
+        }, KeyCode.Q);
+        
+        FXGL.getInput().addAction(new UserAction("Rotate Right") {
+            @Override
+            protected void onActionBegin() {
+                if (currentPhase == GamePhase.PLACING && previewPlatform != null) {
+                    currentRotation += 15;
+                    previewPlatform.setRotation(currentRotation);
+                }
+            }
+        }, KeyCode.E);
+
+        // 滑鼠點擊（選擇或開始拖曳）
         FXGL.getInput().addAction(new UserAction("Click") {
             @Override
             protected void onActionBegin() {
@@ -605,10 +696,33 @@ public class GameClient extends GameApplication {
                 if (currentPhase == GamePhase.SELECTING && selectedObjectId == null) {
                     handleObjectSelection(mousePos);
                 }
-                // 放置階段：點擊放置物件
-                else if (currentPhase == GamePhase.PLACING && myPlacement == null && selectedObjectId != null) {
-                    handleObjectPlacement(mousePos);
+                // 放置階段：開始拖曳或點擊完成按鈕
+                else if (currentPhase == GamePhase.PLACING) {
+                    // 檢查是否點擊完成按鈕
+                    if (finishButton != null && myPlacement == null && previewPlatform != null) {
+                        double btnX = SCREEN_WIDTH - 250;
+                        double btnY = SCREEN_HEIGHT - 100;
+                        if (mousePos.getX() >= btnX && mousePos.getX() <= btnX + 200 &&
+                            mousePos.getY() >= btnY && mousePos.getY() <= btnY + 60) {
+                            confirmPlacement();
+                            return;
+                        }
+                    }
+                    
+                    // 開始拖曳
+                    if (myPlacement == null && previewPlatform != null) {
+                        isDragging = true;
+                        dragOffset = new Point2D(
+                            mousePos.getX() - previewPlatform.getX(),
+                            mousePos.getY() - previewPlatform.getY()
+                        );
+                    }
                 }
+            }
+            
+            @Override
+            protected void onActionEnd() {
+                isDragging = false;
             }
         }, MouseButton.PRIMARY);
         
@@ -646,6 +760,7 @@ public class GameClient extends GameApplication {
                 mousePos.getY() >= btnTop && mousePos.getY() <= btnBottom) {
                 
                 selectedObjectId = obj.id;
+                selectedObj = obj;
                 System.out.println("Selected object: " + obj.id + " (Size: " + obj.width + "x" + obj.height + ")");
                 
                 // 發送選擇訊息給伺服器
@@ -662,6 +777,9 @@ public class GameClient extends GameApplication {
                 // 清除選擇界面
                 clearObjectSelection();
                 
+                // 創建預覽平台（在螢幕中央）
+                createPreviewPlatform();
+                
                 // 顯示等待訊息
                 phaseText.setText("Waiting for other players...");
                 break;
@@ -670,25 +788,39 @@ public class GameClient extends GameApplication {
     }
     
     /**
-     * 處理物件放置
+     * 創建預覽平台
      */
-    private void handleObjectPlacement(Point2D mousePos) {
-        GameObjectInfo selectedObj = null;
-        for (GameObjectInfo obj : availableObjects) {
-            if (obj.id == selectedObjectId) {
-                selectedObj = obj;
-                break;
-            }
-        }
-        
-        if (selectedObj != null) {
-            double x = mousePos.getX() - selectedObj.width / 2.0;
-            double y = mousePos.getY() - selectedObj.height / 2.0;
+    private void createPreviewPlatform() {
+        if (selectedObj != null && previewPlatform == null) {
+            double x = SCREEN_WIDTH / 2 - selectedObj.width / 2.0;
+            double y = SCREEN_HEIGHT / 2 - selectedObj.height / 2.0;
             
+            Rectangle rect = new Rectangle(selectedObj.width, selectedObj.height, Color.web(selectedObj.color));
+            rect.setStroke(Color.YELLOW);
+            rect.setStrokeWidth(3);
+            
+            previewPlatform = FXGL.entityBuilder()
+                    .at(x, y)
+                    .view(rect)
+                    .buildAndAttach();
+            
+            currentRotation = 0;
+        }
+    }
+    
+    /**
+     * 確認放置物件
+     */
+    private void confirmPlacement() {
+        if (selectedObj != null && previewPlatform != null) {
             myPlacement = new PlatformPlacement(
-                selectedObj.id, x, y,
-                selectedObj.width, selectedObj.height,
-                selectedObj.color
+                selectedObj.id, 
+                previewPlatform.getX(), 
+                previewPlatform.getY(),
+                selectedObj.width, 
+                selectedObj.height,
+                selectedObj.color,
+                currentRotation
             );
             
             // 發送放置訊息給伺服器
@@ -698,21 +830,29 @@ public class GameClient extends GameApplication {
                     out.flush();
                     out.reset();
                 }
+                System.out.println("Placement confirmed at (" + myPlacement.x + ", " + myPlacement.y + 
+                                 ") with rotation " + currentRotation);
             } catch (Exception e) {
                 System.err.println("Failed to send placement: " + e.getMessage());
             }
             
-            // 創建預覽平台
-            if (previewPlatform != null) {
-                previewPlatform.removeFromWorld();
-            }
-            previewPlatform = createPlatform(x, y, selectedObj.width, selectedObj.height, 
-                                            Color.web(selectedObj.color));
+            // 顯示等待訊息
+            phaseText.setText("Waiting for other players...");
+            hideFinishButton();
         }
     }
     
     @Override
     protected void onUpdate(double tpf) {
+        // 拖曳物件
+        if (currentPhase == GamePhase.PLACING && isDragging && previewPlatform != null) {
+            Point2D mousePos = FXGL.getInput().getMousePositionWorld();
+            previewPlatform.setPosition(
+                mousePos.getX() - dragOffset.getX(),
+                mousePos.getY() - dragOffset.getY()
+            );
+        }
+        
         // 更新計時器
         if (currentPhase == GamePhase.PLAYING && gameStartTime > 0) {
             long elapsed = System.currentTimeMillis() - gameStartTime;
@@ -728,7 +868,7 @@ public class GameClient extends GameApplication {
         }
         
         // 檢查玩家是否到達終點
-        if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+        if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
             double playerX = player.getX();
             double playerY = player.getY();
             double endX = endPlatform.getX();
@@ -745,7 +885,8 @@ public class GameClient extends GameApplication {
                         out.flush();
                         out.reset();
                     }
-                    player.setVisible(false); // 隱藏玩家，表示已完成
+                    hasFinished = true;
+                    System.out.println("Player finished!");
                 } catch (Exception e) {
                     System.err.println("Failed to send finish message: " + e.getMessage());
                 }
