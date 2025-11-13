@@ -8,6 +8,12 @@ import java.util.Map;
  * 檔案名稱：SharedMessages.java
  */
 
+// 遊戲階段枚舉
+enum GamePhase {
+    SELECTING,  // 選擇平台
+    PLACING,    // 放置平台
+    PLAYING     // 競賽階段
+}
 
 // 初始化訊息
 class InitMessage implements Serializable {
@@ -97,15 +103,17 @@ class PlatformPlacement implements Serializable {
     }
 }
 
-// 放置訊息
+// 放置訊息（包含是否確認）
 class PlacementMessage implements Serializable {
     private static final long serialVersionUID = 1L;
     String playerId;
     PlatformPlacement placement;
+    boolean confirmed;  // 是否確認放置（true）或只是預覽（false）
     
-    public PlacementMessage(String playerId, PlatformPlacement placement) {
+    public PlacementMessage(String playerId, PlatformPlacement placement, boolean confirmed) {
         this.playerId = playerId;
         this.placement = placement;
+        this.confirmed = confirmed;
     }
 }
 
@@ -143,8 +151,20 @@ class DisconnectMessage implements Serializable {
 class FinishMessage implements Serializable {
     private static final long serialVersionUID = 1L;
     String playerId;
+    long finishTime;  // 完成時間（毫秒）
     
-    public FinishMessage(String playerId) {
+    public FinishMessage(String playerId, long finishTime) {
+        this.playerId = playerId;
+        this.finishTime = finishTime;
+    }
+}
+
+// 失敗訊息（掉出地圖）
+class FailMessage implements Serializable {
+    private static final long serialVersionUID = 1L;
+    String playerId;
+    
+    public FailMessage(String playerId) {
         this.playerId = playerId;
     }
 }
@@ -156,5 +176,19 @@ class ScoreUpdateMessage implements Serializable {
     
     public ScoreUpdateMessage(Map<String, Integer> scores) {
         this.scores = scores;
+    }
+}
+
+// 回合結束訊息（顯示排行榜）
+class RoundEndMessage implements Serializable {
+    private static final long serialVersionUID = 1L;
+    Map<String, Integer> roundScores;  // 本回合分數
+    Map<String, Integer> totalScores;  // 總分
+    List<String> finishOrder;  // 完成順序
+    
+    public RoundEndMessage(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
+        this.roundScores = roundScores;
+        this.totalScores = totalScores;
+        this.finishOrder = finishOrder;
     }
 }
