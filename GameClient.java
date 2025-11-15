@@ -90,73 +90,110 @@ public class GameClient extends GameApplication {
         title.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 60));
         title.setFill(Color.GOLD);
         Entity titleEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 250, 200)
+                .at(SCREEN_WIDTH / 2 - 250, 150)
                 .view(title)
                 .buildAndAttach();
         menuEntities.add(titleEntity);
         
-        // 創建房間按鈕
-        Rectangle createBtn = new Rectangle(400, 80, Color.rgb(50, 150, 50));
-        createBtn.setStroke(Color.WHITE);
-        createBtn.setStrokeWidth(3);
-        Entity createBtnEntity = FXGL.entityBuilder()
+        // 創建公共房間按鈕
+        Rectangle createPublicBtn = new Rectangle(400, 70, Color.rgb(50, 150, 50));
+        createPublicBtn.setStroke(Color.WHITE);
+        createPublicBtn.setStrokeWidth(3);
+        Entity createPublicEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 300)
+                .view(createPublicBtn)
+                .buildAndAttach();
+        menuEntities.add(createPublicEntity);
+        
+        Text createPublicText = new Text("CREATE PUBLIC ROOM");
+        createPublicText.setFont(Font.font(24));
+        createPublicText.setFill(Color.WHITE);
+        Entity createPublicTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 150, 345)
+                .view(createPublicText)
+                .buildAndAttach();
+        menuEntities.add(createPublicTextEntity);
+        
+        // 創建私人房間按鈕
+        Rectangle createPrivateBtn = new Rectangle(400, 70, Color.rgb(50, 100, 150));
+        createPrivateBtn.setStroke(Color.WHITE);
+        createPrivateBtn.setStrokeWidth(3);
+        Entity createPrivateEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 200, 400)
-                .view(createBtn)
+                .view(createPrivateBtn)
                 .buildAndAttach();
-        menuEntities.add(createBtnEntity);
+        menuEntities.add(createPrivateEntity);
         
-        Text createText = new Text("CREATE ROOM");
-        createText.setFont(Font.font(28));
-        createText.setFill(Color.WHITE);
-        Entity createTextEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 120, 455)
-                .view(createText)
+        Text createPrivateText = new Text("CREATE PRIVATE ROOM");
+        createPrivateText.setFont(Font.font(24));
+        createPrivateText.setFill(Color.WHITE);
+        Entity createPrivateTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 155, 445)
+                .view(createPrivateText)
                 .buildAndAttach();
-        menuEntities.add(createTextEntity);
+        menuEntities.add(createPrivateTextEntity);
         
-        // 加入房間按鈕
-        Rectangle joinBtn = new Rectangle(400, 80, Color.rgb(50, 50, 150));
-        joinBtn.setStroke(Color.WHITE);
-        joinBtn.setStrokeWidth(3);
-        Entity joinBtnEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 200, 550)
-                .view(joinBtn)
+        // 加入隨機公共房間按鈕
+        Rectangle joinRandomBtn = new Rectangle(400, 70, Color.rgb(150, 50, 150));
+        joinRandomBtn.setStroke(Color.WHITE);
+        joinRandomBtn.setStrokeWidth(3);
+        Entity joinRandomEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 500)
+                .view(joinRandomBtn)
                 .buildAndAttach();
-        menuEntities.add(joinBtnEntity);
+        menuEntities.add(joinRandomEntity);
         
-        Text joinText = new Text("JOIN ROOM");
-        joinText.setFont(Font.font(28));
-        joinText.setFill(Color.WHITE);
-        Entity joinTextEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 100, 605)
-                .view(joinText)
+        Text joinRandomText = new Text("JOIN RANDOM ROOM");
+        joinRandomText.setFont(Font.font(24));
+        joinRandomText.setFill(Color.WHITE);
+        Entity joinRandomTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 140, 545)
+                .view(joinRandomText)
                 .buildAndAttach();
-        menuEntities.add(joinTextEntity);
+        menuEntities.add(joinRandomTextEntity);
         
-        // 房間代碼輸入框 (JavaFX TextField)
+        // 用房間碼加入按鈕
+        Rectangle joinCodeBtn = new Rectangle(400, 70, Color.rgb(50, 50, 150));
+        joinCodeBtn.setStroke(Color.WHITE);
+        joinCodeBtn.setStrokeWidth(3);
+        Entity joinCodeEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 600)
+                .view(joinCodeBtn)
+                .buildAndAttach();
+        menuEntities.add(joinCodeEntity);
+        
+        Text joinCodeText = new Text("JOIN WITH CODE");
+        joinCodeText.setFont(Font.font(24));
+        joinCodeText.setFill(Color.WHITE);
+        Entity joinCodeTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 120, 645)
+                .view(joinCodeText)
+                .buildAndAttach();
+        menuEntities.add(joinCodeTextEntity);
+        
+        // 房間代碼輸入框
         roomCodeInput = new javafx.scene.control.TextField();
         roomCodeInput.setPromptText("Enter 4-digit room code");
-        roomCodeInput.setFont(Font.font(24));
+        roomCodeInput.setFont(Font.font(20));
         roomCodeInput.setPrefWidth(400);
-        roomCodeInput.setPrefHeight(60);
+        roomCodeInput.setPrefHeight(50);
         roomCodeInput.setLayoutX(SCREEN_WIDTH / 2 - 200);
-        roomCodeInput.setLayoutY(670);
+        roomCodeInput.setLayoutY(700);
         roomCodeInput.setVisible(false);
         FXGL.getGameScene().addUINode(roomCodeInput);
         
         // 說明文字
-        Text hint = new Text("1-3 Players | 5 Rounds");
-        hint.setFont(Font.font(20));
+        Text hint = new Text("Public: Join anyone | Private: Need room code");
+        hint.setFont(Font.font(18));
         hint.setFill(Color.LIGHTGRAY);
         Entity hintEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 120, 850)
+                .at(SCREEN_WIDTH / 2 - 220, 800)
                 .view(hint)
                 .buildAndAttach();
         menuEntities.add(hintEntity);
         
         uiState = UIState.MENU;
     }
-
     /**
      * 創建房間UI
      */
@@ -167,6 +204,15 @@ public class GameClient extends GameApplication {
         if (currentRoomInfo == null) return;
         
         // 房間代碼顯示
+        String roomType = currentRoomInfo.roomType == RoomType.PUBLIC ? "PUBLIC" : "PRIVATE";
+        Text typeText = new Text("Type: " + roomType);
+        typeText.setFont(Font.font(20));
+        typeText.setFill(currentRoomInfo.roomType == RoomType.PUBLIC ? Color.LIGHTGREEN : Color.LIGHTSALMON);
+        Entity typeEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 50, 130)
+                .view(typeText)
+                .buildAndAttach();
+        roomUIEntities.add(typeEntity);
         Text roomCodeText = new Text("Room Code: " + currentRoomInfo.roomCode);
         roomCodeText.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 40));
         roomCodeText.setFill(Color.GOLD);
@@ -337,36 +383,65 @@ public class GameClient extends GameApplication {
     /**
      * 處理主選單點擊
      */
-    private void handleMenuClick(Point2D mousePos) {
-        double x = mousePos.getX();
-        double y = mousePos.getY();
+   private void handleMenuClick(Point2D mousePos) {
+    double x = mousePos.getX();
+    double y = mousePos.getY();
+    
+    int maxPlayers = 3;  // 預設3人房
+    
+    // 創建公共房間
+    if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+        y >= 300 && y <= 370) {
         
-        // 創建房間按鈕
-        if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
-            y >= 400 && y <= 480) {
-            
-            // 顯示選擇玩家數量對話框（這裡簡化為2人房間）
-            int maxPlayers = 2; // 可以改為讓玩家選擇1-3
-            
-            try {
-                synchronized (out) {
-                    out.writeObject(new CreateRoomRequest(maxPlayers));
-                    out.flush();
-                    out.reset();
-                }
-                System.out.println("[CLIENT] Sent create room request");
-            } catch (Exception e) {
-                System.err.println("[CLIENT ERROR] Failed to create room: " + e.getMessage());
+        try {
+            synchronized (out) {
+                out.writeObject(new CreateRoomRequest(maxPlayers, RoomType.PUBLIC));
+                out.flush();
+                out.reset();
             }
-        }
-        // 加入房間按鈕
-        else if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
-                y >= 550 && y <= 630) {
-            
-            roomCodeInput.setVisible(true);
-            roomCodeInput.requestFocus();
+            System.out.println("[CLIENT] Sent create public room request");
+        } catch (Exception e) {
+            System.err.println("[CLIENT ERROR] Failed to create room: " + e.getMessage());
         }
     }
+    // 創建私人房間
+    else if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+             y >= 400 && y <= 470) {
+        
+        try {
+            synchronized (out) {
+                out.writeObject(new CreateRoomRequest(maxPlayers, RoomType.PRIVATE));
+                out.flush();
+                out.reset();
+            }
+            System.out.println("[CLIENT] Sent create private room request");
+        } catch (Exception e) {
+            System.err.println("[CLIENT ERROR] Failed to create room: " + e.getMessage());
+        }
+    }
+    // 加入隨機公共房間
+    else if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+             y >= 500 && y <= 570) {
+        
+        try {
+            synchronized (out) {
+                out.writeObject(new JoinRandomRoomRequest());
+                out.flush();
+                out.reset();
+            }
+            System.out.println("[CLIENT] Sent join random room request");
+        } catch (Exception e) {
+            System.err.println("[CLIENT ERROR] Failed to join random: " + e.getMessage());
+        }
+    }
+    // 用房間碼加入
+    else if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+             y >= 600 && y <= 670) {
+        
+        roomCodeInput.setVisible(true);
+        roomCodeInput.requestFocus();
+    }
+}
 
     /**
      * 處理房間UI點擊

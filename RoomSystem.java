@@ -6,6 +6,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * 房間系統相關類別
  */
 
+// 房間類型
+enum RoomType {
+    PRIVATE,  // 私人房間（需要房間碼）
+    PUBLIC    // 公共房間（可隨機加入）
+}
+
 // 房間狀態
 enum RoomState {
     WAITING,    // 等待玩家
@@ -24,8 +30,9 @@ class RoomInfo implements Serializable {
     int currentRound;
     int totalRounds;
     Map<String, Boolean> readyStatus;
+    RoomType roomType;
     
-    public RoomInfo(String roomCode, String hostId, int maxPlayers) {
+    public RoomInfo(String roomCode, String hostId, int maxPlayers, RoomType roomType) {
         this.roomCode = roomCode;
         this.hostId = hostId;
         this.playerIds = new ArrayList<>();
@@ -36,16 +43,19 @@ class RoomInfo implements Serializable {
         this.totalRounds = 5;
         this.readyStatus = new HashMap<>();
         this.readyStatus.put(hostId, false);
+        this.roomType = roomType;
     }
 }
 
 // 創建房間請求
 class CreateRoomRequest implements Serializable {
     private static final long serialVersionUID = 1L;
-    int maxPlayers; // 1-3人
+    int maxPlayers;
+    RoomType roomType;
     
-    public CreateRoomRequest(int maxPlayers) {
+    public CreateRoomRequest(int maxPlayers, RoomType roomType) {
         this.maxPlayers = maxPlayers;
+        this.roomType = roomType;
     }
 }
 
@@ -71,6 +81,11 @@ class JoinRoomRequest implements Serializable {
     public JoinRoomRequest(String roomCode) {
         this.roomCode = roomCode;
     }
+}
+
+// 隨機加入公共房間請求
+class JoinRandomRoomRequest implements Serializable {
+    private static final long serialVersionUID = 1L;
 }
 
 // 加入房間回應
@@ -151,12 +166,13 @@ class RoomManager {
     /**
      * 創建房間
      */
-    public static Room createRoom(String hostId, int maxPlayers) {
+    public static Room createRoom(String hostId, int maxPlayers, RoomType roomType) {
         String roomCode = generateRoomCode();
-        Room room = new Room(roomCode, hostId, maxPlayers);
+        Room room = new Room(roomCode, hostId, maxPlayers, roomType);
         rooms.put(roomCode, room);
         playerToRoom.put(hostId, roomCode);
-        System.out.println("[ROOM] Created room " + roomCode + " by " + hostId + " (max: " + maxPlayers + ")");
+        System.out.println("[ROOM] Created " + roomType + " room " + roomCode + 
+                          " by " + hostId + " (max: " + maxPlayers + ")");
         return room;
     }
     
@@ -174,6 +190,40 @@ class RoomManager {
             System.out.println("[ROOM] " + playerId + " joined room " + roomCode);
             return room;
         }
+        return null;
+    }
+    
+    /**
+     * 隨機加入公共房間
+     */
+    public static Room joinRandomPublicRoom(String playerId) {
+        // 找到所有等待中的公共房間
+        List<Room> availableRooms = new ArrayList<>();
+        
+        for (Room room : rooms.values()) {
+            RoomInfo info = room.getInfo();
+            if (info.roomType == RoomType.PUBLIC && 
+                info.state == RoomState.WAITING &&
+                info.playerIds.size() < info.maxPlayers) {
+                availableRooms.add(room);
+            }
+        }
+        
+        if (availableRooms.isEmpty()) {
+            System.out.println("[ROOM] No public rooms available for " + playerId);
+            return null;
+        }
+        
+        // 隨機選擇一個房間
+        Room room = availableRooms.get(random.nextInt(availableRooms.size()));
+        
+        if (room.addPlayer(playerId)) {
+            playerToRoom.put(playerId, room.getInfo().roomCode);
+            System.out.println("[ROOM] " + playerId + " randomly joined public room " + 
+                             room.getInfo().roomCode);
+            return room;
+        }
+        
         return null;
     }
     
@@ -208,5 +258,18 @@ class RoomManager {
     public static Room getRoom(String roomCode) {
         return rooms.get(roomCode);
     }
+    
+    /**
+     * 獲取所有公共房間數量（用於調試）
+     */
+    public static int getPublicRoomCount() {
+        int count = 0;
+        for (Room room : rooms.values()) {
+            if (room.getInfo().roomType == RoomType.PUBLIC && 
+                room.getInfo().state == RoomState.WAITING) {
+                count++;
+            }
+        }
+        return count;
+    }
 }
-

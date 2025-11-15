@@ -118,7 +118,10 @@ public class GameServer {
                                 handleFail(failMsg);
                             }
                         }
-                        
+                       
+else if (obj instanceof JoinRandomRoomRequest) {
+    handleJoinRandomRoom();
+}
                     } catch (EOFException | SocketException e) {
                         System.out.println("[DISCONNECT] Client: " + playerId);
                         break;
@@ -137,17 +140,18 @@ public class GameServer {
         /**
          * 創建房間
          */
-        private void handleCreateRoom(CreateRoomRequest req) {
+       private void handleCreateRoom(CreateRoomRequest req) {
             if (currentRoom != null) {
                 sendObject(new CreateRoomResponse(false, null, "Already in a room"));
                 return;
             }
             
-            currentRoom = RoomManager.createRoom(playerId, req.maxPlayers);
+            currentRoom = RoomManager.createRoom(playerId, req.maxPlayers, req.roomType);  // 加入 roomType
             sendObject(new CreateRoomResponse(true, currentRoom.getInfo().roomCode, "Room created successfully"));
             sendObject(new RoomUpdateMessage(currentRoom.getInfo()));
             
-            System.out.println("[ROOM] " + playerId + " created room " + currentRoom.getInfo().roomCode);
+            System.out.println("[ROOM] " + playerId + " created " + req.roomType + " room " + 
+                            currentRoom.getInfo().roomCode);
         }
         
         /**
@@ -242,6 +246,28 @@ public class GameServer {
             startRoundMonitor();
         }
         
+
+            private void handleJoinRandomRoom() {
+                if (currentRoom != null) {
+                    sendObject(new JoinRoomResponse(false, "Already in a room", null));
+                    return;
+                }
+                
+                currentRoom = RoomManager.joinRandomPublicRoom(playerId);
+                
+                if (currentRoom == null) {
+                    sendObject(new JoinRoomResponse(false, "No public rooms available", null));
+                    return;
+                }
+                
+                sendObject(new JoinRoomResponse(true, "Joined public room", currentRoom.getInfo()));
+                
+                // 通知房間所有玩家
+                broadcastRoomUpdate();
+                
+                System.out.println("[ROOM] " + playerId + " randomly joined public room " + 
+                                currentRoom.getInfo().roomCode);
+            }
         /**
          * 回合監控線程
          */
@@ -629,11 +655,11 @@ class Room {
     final Set<String> failedPlayers = ConcurrentHashMap.newKeySet();
     final Set<String> completedPlayers = ConcurrentHashMap.newKeySet();
     
-    public Room(String roomCode, String hostId, int maxPlayers) {
-        this.info = new RoomInfo(roomCode, hostId, maxPlayers);
-        // 初始化分數
-        playerTotalScores.put(hostId, 0);
-    }
+    public Room(String roomCode, String hostId, int maxPlayers, RoomType roomType) {
+    this.info = new RoomInfo(roomCode, hostId, maxPlayers, roomType);
+    // 初始化分數
+    playerTotalScores.put(hostId, 0);
+}
     
     public boolean addPlayer(String playerId) {
         synchronized (lock) {
@@ -713,16 +739,16 @@ class Room {
     }
     
     public RoomInfo getInfo() {
-        synchronized (lock) {
-            RoomInfo copy = new RoomInfo(info.roomCode, info.hostId, info.maxPlayers);
-            copy.playerIds = new ArrayList<>(info.playerIds);
-            copy.state = info.state;
-            copy.currentRound = info.currentRound;
-            copy.totalRounds = info.totalRounds;
-            copy.readyStatus = new HashMap<>(info.readyStatus);
-            return copy;
-        }
+    synchronized (lock) {
+        RoomInfo copy = new RoomInfo(info.roomCode, info.hostId, info.maxPlayers, info.roomType);
+        copy.playerIds = new ArrayList<>(info.playerIds);
+        copy.state = info.state;
+        copy.currentRound = info.currentRound;
+        copy.totalRounds = info.totalRounds;
+        copy.readyStatus = new HashMap<>(info.readyStatus);
+        return copy;
     }
+}
     
     public boolean isEmpty() {
         synchronized (lock) {
