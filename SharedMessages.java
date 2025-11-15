@@ -185,10 +185,18 @@ class RoundEndMessage implements Serializable {
     Map<String, Integer> roundScores;  // 本回合分數
     Map<String, Integer> totalScores;  // 總分
     List<String> finishOrder;  // 完成順序
-    
-    public RoundEndMessage(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
-        this.roundScores = roundScores;
-        this.totalScores = totalScores;
-        this.finishOrder = finishOrder;
-    }
+    int currentRound;     
+    int totalRounds; 
+   public RoundEndMessage(Map<String, Integer> roundScores,
+                       Map<String, Integer> totalScores,
+                       List<String> finishOrder,
+                       int currentRound,
+                       int totalRounds) {
+    this.roundScores = roundScores;
+    this.totalScores = totalScores;
+    this.finishOrder = finishOrder;
+    this.currentRound = currentRound;
+    this.totalRounds = totalRounds;
+}
+
 }

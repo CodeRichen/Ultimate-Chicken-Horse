@@ -66,6 +66,371 @@ public class GameClient extends GameApplication {
     
     private boolean hasFinished = false;
     private boolean hasFailed = false;
+    private enum UIState {
+        MENU,      // 主選單
+        IN_ROOM,   // 在房間中
+        PLAYING    // 遊戲中
+    }
+
+    private UIState uiState = UIState.MENU;
+    private RoomInfo currentRoomInfo = null;
+    private List<Entity> menuEntities = new ArrayList<>();
+    private List<Entity> roomUIEntities = new ArrayList<>();
+    private javafx.scene.control.TextField roomCodeInput;
+
+    /**
+     * 創建主選單UI
+     */
+    private void createMainMenu() {
+        System.out.println("[CLIENT] Creating main menu");
+        clearAllUI();
+        
+        // 標題
+        Text title = new Text("PLATFORM RACE");
+        title.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 60));
+        title.setFill(Color.GOLD);
+        Entity titleEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, 200)
+                .view(title)
+                .buildAndAttach();
+        menuEntities.add(titleEntity);
+        
+        // 創建房間按鈕
+        Rectangle createBtn = new Rectangle(400, 80, Color.rgb(50, 150, 50));
+        createBtn.setStroke(Color.WHITE);
+        createBtn.setStrokeWidth(3);
+        Entity createBtnEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 400)
+                .view(createBtn)
+                .buildAndAttach();
+        menuEntities.add(createBtnEntity);
+        
+        Text createText = new Text("CREATE ROOM");
+        createText.setFont(Font.font(28));
+        createText.setFill(Color.WHITE);
+        Entity createTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 120, 455)
+                .view(createText)
+                .buildAndAttach();
+        menuEntities.add(createTextEntity);
+        
+        // 加入房間按鈕
+        Rectangle joinBtn = new Rectangle(400, 80, Color.rgb(50, 50, 150));
+        joinBtn.setStroke(Color.WHITE);
+        joinBtn.setStrokeWidth(3);
+        Entity joinBtnEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 550)
+                .view(joinBtn)
+                .buildAndAttach();
+        menuEntities.add(joinBtnEntity);
+        
+        Text joinText = new Text("JOIN ROOM");
+        joinText.setFont(Font.font(28));
+        joinText.setFill(Color.WHITE);
+        Entity joinTextEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 100, 605)
+                .view(joinText)
+                .buildAndAttach();
+        menuEntities.add(joinTextEntity);
+        
+        // 房間代碼輸入框 (JavaFX TextField)
+        roomCodeInput = new javafx.scene.control.TextField();
+        roomCodeInput.setPromptText("Enter 4-digit room code");
+        roomCodeInput.setFont(Font.font(24));
+        roomCodeInput.setPrefWidth(400);
+        roomCodeInput.setPrefHeight(60);
+        roomCodeInput.setLayoutX(SCREEN_WIDTH / 2 - 200);
+        roomCodeInput.setLayoutY(670);
+        roomCodeInput.setVisible(false);
+        FXGL.getGameScene().addUINode(roomCodeInput);
+        
+        // 說明文字
+        Text hint = new Text("1-3 Players | 5 Rounds");
+        hint.setFont(Font.font(20));
+        hint.setFill(Color.LIGHTGRAY);
+        Entity hintEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 120, 850)
+                .view(hint)
+                .buildAndAttach();
+        menuEntities.add(hintEntity);
+        
+        uiState = UIState.MENU;
+    }
+
+    /**
+     * 創建房間UI
+     */
+    private void createRoomUI() {
+        System.out.println("[CLIENT] Creating room UI");
+        clearAllUI();
+        
+        if (currentRoomInfo == null) return;
+        
+        // 房間代碼顯示
+        Text roomCodeText = new Text("Room Code: " + currentRoomInfo.roomCode);
+        roomCodeText.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 40));
+        roomCodeText.setFill(Color.GOLD);
+        Entity roomCodeEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, 100)
+                .view(roomCodeText)
+                .buildAndAttach();
+        roomUIEntities.add(roomCodeEntity);
+        
+        // 回合資訊
+        String roundInfo = currentRoomInfo.state == RoomState.PLAYING ? 
+            "Round: " + currentRoomInfo.currentRound + "/" + currentRoomInfo.totalRounds :
+            "Waiting to start...";
+        
+        Text roundText = new Text(roundInfo);
+        roundText.setFont(Font.font(24));
+        roundText.setFill(Color.CYAN);
+        Entity roundEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 100, 150)
+                .view(roundText)
+                .buildAndAttach();
+        roomUIEntities.add(roundEntity);
+        
+        // 玩家列表
+        Text playersTitle = new Text("Players (" + currentRoomInfo.playerIds.size() + "/" + 
+                                    currentRoomInfo.maxPlayers + "):");
+        playersTitle.setFont(Font.font(28));
+        playersTitle.setFill(Color.WHITE);
+        Entity playersTitleEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 300, 250)
+                .view(playersTitle)
+                .buildAndAttach();
+        roomUIEntities.add(playersTitleEntity);
+        
+        int yOffset = 300;
+        for (String pid : currentRoomInfo.playerIds) {
+            boolean isHost = pid.equals(currentRoomInfo.hostId);
+            boolean isReady = currentRoomInfo.readyStatus.getOrDefault(pid, false);
+            boolean isMe = pid.equals(myPlayerId);
+            
+            String playerText = (isMe ? "► " : "  ") + pid + 
+                            (isHost ? " (HOST)" : "") + 
+                            (isReady ? " ✓" : "");
+            
+            Text pText = new Text(playerText);
+            pText.setFont(Font.font(22));
+            pText.setFill(isMe ? Color.YELLOW : (isReady ? Color.GREEN : Color.WHITE));
+            Entity pEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 280, yOffset)
+                    .view(pText)
+                    .buildAndAttach();
+            roomUIEntities.add(pEntity);
+            
+            yOffset += 50;
+        }
+        
+        // 準備按鈕（非房主）
+        if (!myPlayerId.equals(currentRoomInfo.hostId) && currentRoomInfo.state == RoomState.WAITING) {
+            boolean myReady = currentRoomInfo.readyStatus.getOrDefault(myPlayerId, false);
+            Color btnColor = myReady ? Color.rgb(150, 150, 50) : Color.rgb(50, 150, 50);
+            String btnText = myReady ? "CANCEL READY" : "READY";
+            
+            Rectangle readyBtn = new Rectangle(300, 70, btnColor);
+            readyBtn.setStroke(Color.WHITE);
+            readyBtn.setStrokeWidth(3);
+            Entity readyBtnEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 150, 600)
+                    .view(readyBtn)
+                    .buildAndAttach();
+            roomUIEntities.add(readyBtnEntity);
+            
+            Text readyText = new Text(btnText);
+            readyText.setFont(Font.font(26));
+            readyText.setFill(Color.WHITE);
+            Entity readyTextEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - (btnText.length() * 8), 645)
+                    .view(readyText)
+                    .buildAndAttach();
+            roomUIEntities.add(readyTextEntity);
+        }
+        
+        // 開始遊戲按鈕（房主且所有人準備）
+        if (myPlayerId.equals(currentRoomInfo.hostId) && currentRoomInfo.state == RoomState.WAITING) {
+            boolean canStart = true;
+                for (String pid : currentRoomInfo.playerIds) {
+                    // 房主不需要準備
+                    if (pid.equals(currentRoomInfo.hostId)) continue;
+                    if (!currentRoomInfo.readyStatus.getOrDefault(pid, false)) {
+                        canStart = false;
+                        break;
+                    }
+                }
+
+            
+            Color btnColor = canStart ? Color.rgb(50, 200, 50) : Color.rgb(100, 100, 100);
+            
+            Rectangle startBtn = new Rectangle(300, 70, btnColor);
+            startBtn.setStroke(Color.WHITE);
+            startBtn.setStrokeWidth(3);
+            Entity startBtnEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 150, 700)
+                    .view(startBtn)
+                    .buildAndAttach();
+            roomUIEntities.add(startBtnEntity);
+            
+            Text startText = new Text("START GAME");
+            startText.setFont(Font.font(26));
+            startText.setFill(Color.WHITE);
+            Entity startTextEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 - 100, 745)
+                    .view(startText)
+                    .buildAndAttach();
+            roomUIEntities.add(startTextEntity);
+            
+            if (!canStart) {
+                Text waitText = new Text("Waiting for all players to ready...");
+                waitText.setFont(Font.font(18));
+                waitText.setFill(Color.ORANGE);
+                Entity waitEntity = FXGL.entityBuilder()
+                        .at(SCREEN_WIDTH / 2 - 180, 790)
+                        .view(waitText)
+                        .buildAndAttach();
+                roomUIEntities.add(waitEntity);
+            }
+        }
+        
+        // 離開房間按鈕
+        Rectangle leaveBtn = new Rectangle(200, 50, Color.rgb(150, 50, 50));
+        leaveBtn.setStroke(Color.WHITE);
+        leaveBtn.setStrokeWidth(2);
+        Entity leaveBtnEntity = FXGL.entityBuilder()
+                .at(50, SCREEN_HEIGHT - 100)
+                .view(leaveBtn)
+                .buildAndAttach();
+        roomUIEntities.add(leaveBtnEntity);
+        
+        Text leaveText = new Text("LEAVE");
+        leaveText.setFont(Font.font(20));
+        leaveText.setFill(Color.WHITE);
+        Entity leaveTextEntity = FXGL.entityBuilder()
+                .at(120, SCREEN_HEIGHT - 63)
+                .view(leaveText)
+                .buildAndAttach();
+        roomUIEntities.add(leaveTextEntity);
+        
+        uiState = UIState.IN_ROOM;
+    }
+
+    /**
+     * 清除所有UI
+     */
+    private void clearAllUI() {
+        for (Entity e : menuEntities) {
+            e.removeFromWorld();
+        }
+        menuEntities.clear();
+        
+        for (Entity e : roomUIEntities) {
+            e.removeFromWorld();
+        }
+        roomUIEntities.clear();
+        
+        if (roomCodeInput != null) {
+            roomCodeInput.setVisible(false);
+        }
+    }
+
+    /**
+     * 處理主選單點擊
+     */
+    private void handleMenuClick(Point2D mousePos) {
+        double x = mousePos.getX();
+        double y = mousePos.getY();
+        
+        // 創建房間按鈕
+        if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+            y >= 400 && y <= 480) {
+            
+            // 顯示選擇玩家數量對話框（這裡簡化為2人房間）
+            int maxPlayers = 2; // 可以改為讓玩家選擇1-3
+            
+            try {
+                synchronized (out) {
+                    out.writeObject(new CreateRoomRequest(maxPlayers));
+                    out.flush();
+                    out.reset();
+                }
+                System.out.println("[CLIENT] Sent create room request");
+            } catch (Exception e) {
+                System.err.println("[CLIENT ERROR] Failed to create room: " + e.getMessage());
+            }
+        }
+        // 加入房間按鈕
+        else if (x >= SCREEN_WIDTH / 2 - 200 && x <= SCREEN_WIDTH / 2 + 200 &&
+                y >= 550 && y <= 630) {
+            
+            roomCodeInput.setVisible(true);
+            roomCodeInput.requestFocus();
+        }
+    }
+
+    /**
+     * 處理房間UI點擊
+     */
+    private void handleRoomClick(Point2D mousePos) {
+        if (currentRoomInfo == null) return;
+        
+        double x = mousePos.getX();
+        double y = mousePos.getY();
+        
+        // 準備按鈕
+        if (!myPlayerId.equals(currentRoomInfo.hostId) && currentRoomInfo.state == RoomState.WAITING) {
+            if (x >= SCREEN_WIDTH / 2 - 150 && x <= SCREEN_WIDTH / 2 + 150 &&
+                y >= 600 && y <= 670) {
+                
+                boolean currentReady = currentRoomInfo.readyStatus.getOrDefault(myPlayerId, false);
+                
+                try {
+                    synchronized (out) {
+                        out.writeObject(new PlayerReadyMessage(myPlayerId, !currentReady));
+                        out.flush();
+                        out.reset();
+                    }
+                    System.out.println("[CLIENT] Toggled ready status");
+                } catch (Exception e) {
+                    System.err.println("[CLIENT ERROR] Failed to toggle ready: " + e.getMessage());
+                }
+            }
+        }
+        
+        // 開始遊戲按鈕（房主）
+        if (myPlayerId.equals(currentRoomInfo.hostId) && currentRoomInfo.state == RoomState.WAITING) {
+            if (x >= SCREEN_WIDTH / 2 - 150 && x <= SCREEN_WIDTH / 2 + 150 &&
+                y >= 700 && y <= 770) {
+                
+                try {
+                    synchronized (out) {
+                        out.writeObject(new StartGameRequest());
+                        out.flush();
+                        out.reset();
+                    }
+                    System.out.println("[CLIENT] Sent start game request");
+                } catch (Exception e) {
+                    System.err.println("[CLIENT ERROR] Failed to start game: " + e.getMessage());
+                }
+            }
+        }
+        
+        // 離開房間按鈕
+        if (x >= 50 && x <= 250 && y >= SCREEN_HEIGHT - 100 && y <= SCREEN_HEIGHT - 50) {
+            try {
+                synchronized (out) {
+                    out.writeObject(new LeaveRoomRequest());
+                    out.flush();
+                    out.reset();
+                }
+                currentRoomInfo = null;
+                createMainMenu();
+                System.out.println("[CLIENT] Left room");
+            } catch (Exception e) {
+                System.err.println("[CLIENT ERROR] Failed to leave room: " + e.getMessage());
+            }
+        }
+    }
 
     @Override
     protected void initSettings(GameSettings settings) {
@@ -93,6 +458,7 @@ public class GameClient extends GameApplication {
         startNetworkThread();
         startPositionSender();
         startPlacementPreviewSender();
+        createMainMenu();
     }
     
     private void createFixedPlatforms() {
@@ -236,68 +602,95 @@ public class GameClient extends GameApplication {
         }
     }
     
-    private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
-        System.out.println("[CLIENT] Showing leaderboard with " + finishOrder.size() + " players");
-        hideLeaderboard();
+private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
+    System.out.println("[CLIENT] Showing leaderboard with " + finishOrder.size() + " players");
+    hideLeaderboard();
+    
+
+    // 隱藏遊戲UI
+    phaseText.setVisible(false);
+    timerText.setVisible(false);
+    scoreText.setVisible(false);
+    Rectangle bg = new Rectangle(700, 600, Color.rgb(40, 40, 50, 0.95));
+    bg.setStroke(Color.GOLD);
+    bg.setStrokeWidth(4);
+    
+    Entity bgEntity = FXGL.entityBuilder()
+            .at(SCREEN_WIDTH / 2 - 350, SCREEN_HEIGHT / 2 - 300)
+            .view(bg)
+            .buildAndAttach();
+    leaderboardEntities.add(bgEntity);
+    
+    // 顯示回合資訊
+    String roundInfo = "ROUND " + (currentRoomInfo != null ? currentRoomInfo.currentRound : "?") + 
+                      " / " + (currentRoomInfo != null ? currentRoomInfo.totalRounds : "5") + 
+                      " COMPLETE!";
+    
+    Text title = new Text(roundInfo);
+    title.setFont(Font.font(36));
+    title.setFill(Color.GOLD);
+    Entity titleEntity = FXGL.entityBuilder()
+            .at(SCREEN_WIDTH / 2 - 200, SCREEN_HEIGHT / 2 - 240)
+            .view(title)
+            .buildAndAttach();
+    leaderboardEntities.add(titleEntity);
+    
+    int yOffset = -140;
+    for (int i = 0; i < finishOrder.size(); i++) {
+        String playerId = finishOrder.get(i);
+        int roundScore = roundScores.getOrDefault(playerId, 0);
+        int totalScore = totalScores.getOrDefault(playerId, 0);
         
-        Rectangle bg = new Rectangle(600, 500, Color.rgb(40, 40, 50, 0.95));
-        bg.setStroke(Color.GOLD);
-        bg.setStrokeWidth(4);
+        String rank = (i + 1) + ". ";
+        String scoreInfo = playerId + " - Round: +" + roundScore + " | Total: " + totalScore;
         
-        Entity bgEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 300, SCREEN_HEIGHT / 2 - 250)
-                .view(bg)
-                .buildAndAttach();
-        leaderboardEntities.add(bgEntity);
+        Text scoreText = new Text(rank + scoreInfo);
+        scoreText.setFont(Font.font(22));
         
-        Text title = new Text("ROUND COMPLETE!");
-        title.setFont(Font.font(36));
-        title.setFill(Color.GOLD);
-        Entity titleEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2 - 200)
-                .view(title)
-                .buildAndAttach();
-        leaderboardEntities.add(titleEntity);
-        
-        int yOffset = 0;
-        for (int i = 0; i < finishOrder.size(); i++) {
-            String playerId = finishOrder.get(i);
-            int roundScore = roundScores.getOrDefault(playerId, 0);
-            int totalScore = totalScores.getOrDefault(playerId, 0);
-            
-            String rank = (i + 1) + ". ";
-            String scoreInfo = playerId + " - Round: +" + roundScore + " | Total: " + totalScore;
-            
-            Text scoreText = new Text(rank + scoreInfo);
-            scoreText.setFont(Font.font(22));
+        // 高亮顯示自己
+        if (playerId.equals(myPlayerId)) {
+            scoreText.setFill(Color.YELLOW);
+            scoreText.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 24));
+        } else {
             scoreText.setFill(i == 0 ? Color.GOLD : Color.WHITE);
-            
-            Entity scoreEntity = FXGL.entityBuilder()
-                    .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2 - 100 + yOffset)
-                    .view(scoreText)
-                    .buildAndAttach();
-            leaderboardEntities.add(scoreEntity);
-            
-            yOffset += 40;
         }
         
-        Text hint = new Text("Next round starting soon...");
-        hint.setFont(Font.font(20));
-        hint.setFill(Color.LIGHTGRAY);
-        Entity hintEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2 + 180)
-                .view(hint)
+        Entity scoreEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 300, SCREEN_HEIGHT / 2 + yOffset)
+                .view(scoreText)
                 .buildAndAttach();
-        leaderboardEntities.add(hintEntity);
+        leaderboardEntities.add(scoreEntity);
+        
+        yOffset += 45;
     }
     
-    private void hideLeaderboard() {
-        System.out.println("[CLIENT] Hiding leaderboard, removing " + leaderboardEntities.size() + " entities");
-        for (Entity entity : leaderboardEntities) {
+    // 提示文字
+    boolean isLastRound = currentRoomInfo != null && 
+                         currentRoomInfo.currentRound >= currentRoomInfo.totalRounds;
+    String hintMsg = isLastRound ? "Returning to room..." : "Next round starting soon...";
+    
+    Text hint = new Text(hintMsg);
+    hint.setFont(Font.font(20));
+    hint.setFill(Color.LIGHTGRAY);
+    Entity hintEntity = FXGL.entityBuilder()
+            .at(SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2 + 230)
+            .view(hint)
+            .buildAndAttach();
+    leaderboardEntities.add(hintEntity);
+}    
+
+private void hideLeaderboard() {
+    System.out.println("[CLIENT] Hiding leaderboard, entities: " + leaderboardEntities.size());
+    
+    for (Entity entity : leaderboardEntities) {
+        if (entity != null && entity.isActive()) {  // 加上檢查！
             entity.removeFromWorld();
         }
-        leaderboardEntities.clear();
     }
+    leaderboardEntities.clear();
+    
+    System.out.println("[CLIENT] Leaderboard cleared");
+}
     
     private void connectToServer() {
         try {
@@ -374,12 +767,101 @@ public class GameClient extends GameApplication {
                             updateScoreDisplay();
                         });
                     }
-                    else if (obj instanceof RoundEndMessage roundEndMsg) {
-                        System.out.println("[CLIENT] Round ended!");
+                 
+                           else if (obj instanceof RoundEndMessage roundEndMsg) {
+    System.out.println("[CLIENT] Round ended! Round: " + roundEndMsg.currentRound);
+    javafx.application.Platform.runLater(() -> {
+        // 更新房間資訊的回合數
+        if (currentRoomInfo != null) {
+            currentRoomInfo.currentRound = roundEndMsg.currentRound;
+            currentRoomInfo.totalRounds = roundEndMsg.totalRounds;
+        }
+        
+        showLeaderboard(roundEndMsg.roundScores, roundEndMsg.totalScores, 
+                       roundEndMsg.finishOrder);
+    });
+}      
+                    else if (obj instanceof CreateRoomResponse createResp) {
                         javafx.application.Platform.runLater(() -> {
-                            showLeaderboard(roundEndMsg.roundScores, roundEndMsg.totalScores, roundEndMsg.finishOrder);
+                            if (createResp.success) {
+                                System.out.println("[CLIENT] Room created: " + createResp.roomCode);
+                                // 等待 RoomUpdateMessage
+                            } else {
+                                System.err.println("[CLIENT] Failed to create room: " + createResp.message);
+                                // 可以顯示錯誤訊息
+                            }
                         });
                     }
+                    else if (obj instanceof JoinRoomResponse joinResp) {
+                        javafx.application.Platform.runLater(() -> {
+                            if (joinResp.success) {
+                                System.out.println("[CLIENT] Joined room successfully");
+                                currentRoomInfo = joinResp.roomInfo;
+                                createRoomUI();
+                            } else {
+                                System.err.println("[CLIENT] Failed to join room: " + joinResp.message);
+                                // 可以顯示錯誤訊息
+                            }
+                        });
+                    }
+                    else if (obj instanceof RoomUpdateMessage roomUpdate) {
+                        javafx.application.Platform.runLater(() -> {
+                            System.out.println("[CLIENT] Room updated");
+                            currentRoomInfo = roomUpdate.roomInfo;
+                            
+                            // 如果在選單狀態，切換到房間UI
+                            if (uiState == UIState.MENU) {
+                                createRoomUI();
+                            }
+                            // 如果在房間狀態，更新房間UI
+                            else if (uiState == UIState.IN_ROOM) {
+                                createRoomUI();
+                            }
+                        });
+                    }
+                    else if (obj instanceof ReturnToRoomMessage returnMsg) {
+                        javafx.application.Platform.runLater(() -> {
+                            System.out.println("[CLIENT] Returning to room: " + returnMsg.message);
+                            
+                            // 清理遊戲狀態
+                            player.setVisible(false);
+                            hasFinished = false;
+                            hasFailed = false;
+                            hideLeaderboard();
+                            clearObjectSelection();
+                            hideFinishButton();
+                            
+                            // 清除平台
+                            for (Entity platform : platformEntities) {
+                                if (platform != startPlatform && platform != endPlatform) {
+                                    platform.removeFromWorld();
+                                }
+                            }
+                            platformEntities.clear();
+                            platformEntities.add(startPlatform);
+                            platformEntities.add(endPlatform);
+                            
+                            // 清除其他玩家
+                            for (Entity otherPlayer : otherPlayers.values()) {
+                                otherPlayer.removeFromWorld();
+                            }
+                            otherPlayers.clear();
+                            
+                            // 返回房間UI
+                            createRoomUI();
+                            
+                            // 顯示訊息
+                            Text msgText = new Text(returnMsg.message);
+                            msgText.setFont(Font.font(24));
+                            msgText.setFill(Color.YELLOW);
+                            Entity msgEntity = FXGL.entityBuilder()
+                                    .at(SCREEN_WIDTH / 2 - 300, SCREEN_HEIGHT / 2)
+                                    .view(msgText)
+                                    .buildAndAttach();
+                            roomUIEntities.add(msgEntity);
+                        });
+                    }
+                                
                 }
             } catch (Exception e) {
                 if (running) {
@@ -458,97 +940,109 @@ public class GameClient extends GameApplication {
         }).start();
     }
     
-    private void handlePhaseChange(GamePhase newPhase) {
-        System.out.println("[CLIENT] Phase changed to: " + newPhase);
-        currentPhase = newPhase;
-        
-        switch (newPhase) {
-            case SELECTING:
-                phaseText.setText("Phase: SELECT YOUR PLATFORM");
-                player.setVisible(false);
-                selectedObjectId = null;
-                selectedObj = null;
-                myPlacement = null;
-                currentRotation = 0;
-                isDragging = false;
-                hasFinished = false;
-                hasFailed = false;
-                hideFinishButton();
-                hideLeaderboard();
-                
-                if (previewPlatform != null) {
-                    previewPlatform.removeFromWorld();
-                    previewPlatform = null;
-                }
-                
-                for (Entity preview : otherPreviewEntities.values()) {
-                    preview.removeFromWorld();
-                }
-                otherPreviewEntities.clear();
-                otherPreviewPlacements.clear();
-                
-                // 清除其他玩家實體（防止重疊）
-                for (Entity otherPlayer : otherPlayers.values()) {
-                    otherPlayer.removeFromWorld();
-                }
-                otherPlayers.clear();
-                
-                if (!availableObjects.isEmpty()) {
-                    displayObjectSelection();
-                }
-                break;
-                
-            case PLACING:
-                phaseText.setText("Phase: DRAG & ROTATE (Q/E 90°), THEN FINISH");
-                clearObjectSelection();
-                    if (previewPlatform != null && myPlacement == null) {
-                        showFinishButton();
-                        }
-                break;
-                
-            case PLAYING:
-                phaseText.setText("Phase: RACE TO FINISH!");
-                hideFinishButton();
-                isDragging = false;
-                
-                if (previewPlatform != null) {
-                    previewPlatform.removeFromWorld();
-                    previewPlatform = null;
-                }
-                
-                for (Entity preview : otherPreviewEntities.values()) {
-                    preview.removeFromWorld();
-                }
-                otherPreviewEntities.clear();
-                
-                // 創建所有玩家本回合放置的平台
-                System.out.println("[CLIENT] Creating platforms: my=" + (myPlacement != null) + 
-                                 " others=" + otherPlacements.size());
-                
-                for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
-                    PlatformPlacement p = entry.getValue();
-                    System.out.println("[CLIENT] Creating platform for " + entry.getKey() + 
-                                     " at (" + p.x + "," + p.y + ") rotation=" + p.rotation);
-                    createPlatformWithRotation(p.x, p.y, p.width, p.height, Color.web(p.color), p.rotation);
-                }
-                
-                if (myPlacement != null) {
-                    System.out.println("[CLIENT] Creating my platform at (" + myPlacement.x + "," + 
-                                     myPlacement.y + ") rotation=" + myPlacement.rotation);
-                    createPlatformWithRotation(myPlacement.x, myPlacement.y, myPlacement.width, 
-                                 myPlacement.height, Color.web(myPlacement.color), myPlacement.rotation);
-                }
-                
-                otherPlacements.clear();
-                
-                player.setVisible(true);
-                player.setPosition(100, 900);
-                player.getComponent(PlayerControl.class).reset();
-                gameStartTime = System.currentTimeMillis();
-                break;
-        }
+private void handlePhaseChange(GamePhase newPhase) {
+    System.out.println("[CLIENT] Phase changed to: " + newPhase);
+    currentPhase = newPhase;
+    
+    // 切換到遊戲UI狀態
+    if (uiState != UIState.PLAYING) {
+        uiState = UIState.PLAYING;
+        clearAllUI();
     }
     
+    switch (newPhase) {
+        case SELECTING:
+            hideLeaderboard();
+            phaseText.setText("Phase: SELECT YOUR PLATFORM");
+            phaseText.setVisible(true);
+            player.setVisible(false);
+            selectedObjectId = null;
+            selectedObj = null;
+            myPlacement = null;
+            currentRotation = 0;
+            isDragging = false;
+            hasFinished = false;
+            hasFailed = false;
+            hideFinishButton();
+            
+            if (previewPlatform != null) {
+                previewPlatform.removeFromWorld();
+                previewPlatform = null;
+            }
+            
+            for (Entity preview : otherPreviewEntities.values()) {
+                preview.removeFromWorld();
+            }
+            otherPreviewEntities.clear();
+            otherPreviewPlacements.clear();
+            
+            // 清除其他玩家實體
+            for (Entity otherPlayer : otherPlayers.values()) {
+                otherPlayer.removeFromWorld();
+            }
+            otherPlayers.clear();
+            
+
+            
+            if (!availableObjects.isEmpty()) {
+                displayObjectSelection();
+            }
+            break;
+            
+        case PLACING:
+            phaseText.setText("Phase: DRAG & ROTATE (Q/E 90°), THEN FINISH");
+            phaseText.setVisible(true);
+            clearObjectSelection();
+            if (previewPlatform != null && myPlacement == null) {
+                showFinishButton();
+            }
+            break;
+            
+        case PLAYING:
+            phaseText.setText("Phase: RACE TO FINISH!");
+            phaseText.setVisible(true);
+            timerText.setVisible(true);
+            scoreText.setVisible(false);
+            hideFinishButton();
+            isDragging = false;
+            
+            if (previewPlatform != null) {
+                previewPlatform.removeFromWorld();
+                previewPlatform = null;
+            }
+            
+            for (Entity preview : otherPreviewEntities.values()) {
+                preview.removeFromWorld();
+            }
+            otherPreviewEntities.clear();
+            
+            // 創建所有玩家本回合放置的平台
+            System.out.println("[CLIENT] Creating platforms: my=" + (myPlacement != null) + 
+                             " others=" + otherPlacements.size());
+            
+            for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
+                PlatformPlacement p = entry.getValue();
+                System.out.println("[CLIENT] Creating platform for " + entry.getKey() + 
+                                 " at (" + p.x + "," + p.y + ") rotation=" + p.rotation);
+                createPlatformWithRotation(p.x, p.y, p.width, p.height, Color.web(p.color), p.rotation);
+            }
+            
+            if (myPlacement != null) {
+                System.out.println("[CLIENT] Creating my platform at (" + myPlacement.x + "," + 
+                                 myPlacement.y + ") rotation=" + myPlacement.rotation);
+                createPlatformWithRotation(myPlacement.x, myPlacement.y, myPlacement.width, 
+                             myPlacement.height, Color.web(myPlacement.color), myPlacement.rotation);
+            }
+            
+            otherPlacements.clear();
+            
+            player.setVisible(true);
+            player.setPosition(100, 900);
+            player.getComponent(PlayerControl.class).reset();
+            gameStartTime = System.currentTimeMillis();
+            break;
+    }
+}    
     private void handlePlacement(PlacementMessage msg) {
         if (msg.confirmed) {
             System.out.println("[CLIENT] Confirmed placement from " + msg.playerId);
@@ -662,7 +1156,31 @@ public class GameClient extends GameApplication {
                 }
             }
         }, KeyCode.A);
-        
+        FXGL.getInput().addAction(new UserAction("Submit Room Code") {
+    @Override
+    protected void onActionBegin() {
+        if (uiState == UIState.MENU && roomCodeInput != null && roomCodeInput.isVisible()) {
+            String code = roomCodeInput.getText().trim();
+            
+            if (code.length() == 4 && code.matches("\\d{4}")) {
+                try {
+                    synchronized (out) {
+                        out.writeObject(new JoinRoomRequest(code));
+                        out.flush();
+                        out.reset();
+                    }
+                    System.out.println("[CLIENT] Sent join room request: " + code);
+                    roomCodeInput.setVisible(false);
+                    roomCodeInput.clear();
+                } catch (Exception e) {
+                    System.err.println("[CLIENT ERROR] Failed to join room: " + e.getMessage());
+                }
+            } else {
+                System.err.println("[CLIENT] Invalid room code: " + code);
+            }
+        }
+    }
+}, KeyCode.ENTER);
         FXGL.getInput().addAction(new UserAction("Move Left Arrow") {
             @Override
             protected void onAction() {
@@ -774,6 +1292,16 @@ public class GameClient extends GameApplication {
             @Override
             protected void onActionBegin() {
                 Point2D mousePos = FXGL.getInput().getMousePositionWorld();
+
+                if (uiState == UIState.MENU) {
+                    handleMenuClick(mousePos);
+                    return;
+                } else if (uiState == UIState.IN_ROOM && currentRoomInfo != null && 
+                        currentRoomInfo.state == RoomState.WAITING) {
+                    handleRoomClick(mousePos);
+                    return;
+                }
+                mousePos = FXGL.getInput().getMousePositionWorld();
                 
                 if (currentPhase == GamePhase.SELECTING && selectedObjectId == null) {
                     handleObjectSelection(mousePos);
@@ -1045,6 +1573,9 @@ class SmoothPlayerComponent extends Component {
     }
 }
 
+/**
+ * 修復後的碰撞檢測 - 放在 GameClient.java 中的 PlatformComponent 類別
+ */
 class PlatformComponent extends Component {
     private double width;
     private double height;
@@ -1062,11 +1593,16 @@ class PlatformComponent extends Component {
         return height;
     }
 
+    /**
+     * 修復後的碰撞檢測 - 支持旋轉平台
+     */
     public CollisionInfo checkCollision(double playerX, double playerY, double radius, double velocityY) {
-        if (entity.getRotation() != 0) {
+        // 如果平台有旋轉，使用旋轉碰撞檢測
+        if (Math.abs(entity.getRotation()) > 0.1) {
             return checkRotatedCollision(playerX, playerY, radius, velocityY);
         }
         
+        // 無旋轉的平台使用原本的 AABB 碰撞檢測
         double platformLeft = entity.getX();
         double platformRight = entity.getX() + width;
         double platformTop = entity.getY();
@@ -1109,60 +1645,104 @@ class PlatformComponent extends Component {
         return new CollisionInfo(true, side);
     }
     
+    /**
+     * 旋轉平台的碰撞檢測（修復版本）
+     * 使用圓形與旋轉矩形的精確碰撞檢測
+     */
     private CollisionInfo checkRotatedCollision(double playerX, double playerY, double radius, double velocityY) {
-        double centerX = entity.getX() + width / 2;
-        double centerY = entity.getY() + height / 2;
-        
-        double angle = Math.toRadians(-entity.getRotation());
-        
-        double dx = playerX - centerX;
-        double dy = playerY - centerY;
-        double localX = dx * Math.cos(angle) - dy * Math.sin(angle);
-        double localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-        
-        double halfWidth = width / 2;
-        double halfHeight = height / 2;
-        
-        double closestX = Math.max(-halfWidth, Math.min(halfWidth, localX));
-        double closestY = Math.max(-halfHeight, Math.min(halfHeight, localY));
-        
-        double distX = localX - closestX;
-        double distY = localY - closestY;
-        double distSquared = distX * distX + distY * distY;
-        
-        if (distSquared > radius * radius) {
-            return new CollisionInfo(false, CollisionSide.NONE);
-        }
-        
-        CollisionSide side = CollisionSide.NONE;
-        if (Math.abs(closestY + halfHeight) < 5 && velocityY >= 0) {
+    double centerX = entity.getX() + width / 2;
+    double centerY = entity.getY() + height / 2;
+    double angle = Math.toRadians(-entity.getRotation());
+    
+    // 將玩家座標轉換到平台的局部座標系
+    double dx = playerX - centerX;
+    double dy = playerY - centerY;
+    double localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+    double localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+    
+    double halfWidth = width / 2;
+    double halfHeight = height / 2;
+    
+    // 找到矩形上最接近圓心的點
+    double closestX = Math.max(-halfWidth, Math.min(halfWidth, localX));
+    double closestY = Math.max(-halfHeight, Math.min(halfHeight, localY));
+    
+    // 計算距離
+    double distX = localX - closestX;
+    double distY = localY - closestY;
+    double distSquared = distX * distX + distY * distY;
+    
+    if (distSquared > radius * radius) {
+        return new CollisionInfo(false, CollisionSide.NONE);
+    }
+    
+    // 改進的碰撞面判定
+    CollisionSide side = CollisionSide.NONE;
+    
+    // 計算到各邊的距離
+    double distToTop = Math.abs(localY + halfHeight);
+    double distToBottom = Math.abs(localY - halfHeight);
+    double distToLeft = Math.abs(localX + halfWidth);
+    double distToRight = Math.abs(localX - halfWidth);
+    
+    double minDist = Math.min(Math.min(distToTop, distToBottom), 
+                             Math.min(distToLeft, distToRight));
+    
+    double threshold = 3.0;  // 閾值
+    
+    // 判斷碰撞面 - 使用全局速度方向
+    if (minDist == distToTop && distToTop < threshold) {
+        // 在頂邊附近
+        if (velocityY >= 0) {
             side = CollisionSide.TOP;
-        } else if (Math.abs(closestY - halfHeight) < 5 && velocityY <= 0) {
-            side = CollisionSide.BOTTOM;
-        } else if (Math.abs(closestX + halfWidth) < 5) {
-            side = CollisionSide.LEFT;
-        } else if (Math.abs(closestX - halfWidth) < 5) {
-            side = CollisionSide.RIGHT;
         }
-        
-        return new CollisionInfo(true, side);
+    } else if (minDist == distToBottom && distToBottom < threshold) {
+        // 在底邊附近
+        if (velocityY <= 0) {
+            side = CollisionSide.BOTTOM;
+        }
+    } else if (minDist == distToLeft && distToLeft < threshold) {
+        side = CollisionSide.LEFT;
+    } else if (minDist == distToRight && distToRight < threshold) {
+        side = CollisionSide.RIGHT;
     }
+    
+    return new CollisionInfo(true, side);
 }
-
-class CollisionInfo {
-    boolean collided;
-    CollisionSide side;
-
-    CollisionInfo(boolean collided, CollisionSide side) {
-        this.collided = collided;
-        this.side = side;
+    
+    /**
+     * 獲取旋轉平台在世界座標系中的表面Y座標
+     * 用於精確放置玩家
+     */
+public double getRotatedSurfaceY(double playerX) {
+    if (Math.abs(entity.getRotation()) < 0.1) {
+        return entity.getY();
     }
+    
+    double centerX = entity.getX() + width / 2;
+    double centerY = entity.getY() + height / 2;
+    double angle = Math.toRadians(-entity.getRotation());
+    
+    // 將玩家X轉換到局部座標
+    double dx = playerX - centerX;
+    double localX = dx * Math.cos(angle);
+    
+    // 限制在平台寬度內
+    double halfWidth = width / 2;
+    localX = Math.max(-halfWidth, Math.min(halfWidth, localX));
+    
+    // 頂面的局部Y座標（考慮玩家半徑的誤差修正）
+    double localY = -height / 2 - 2;  // 往上偏移一點，避免陷入
+    
+    // 轉換回世界座標
+    double worldY = centerY + (localX * Math.sin(angle) + localY * Math.cos(angle));
+    return worldY;
+}
 }
 
-enum CollisionSide {
-    NONE, TOP, BOTTOM, LEFT, RIGHT
-}
-
+/**
+ * 修復後的玩家控制 - 放在 GameClient.java 中
+ */
 class PlayerControl extends Component {
     private double speed = 8.0;
     private double velocityX = 0;
@@ -1190,78 +1770,95 @@ class PlayerControl extends Component {
         crouching = false;
     }
 
-    @Override
-    public void onUpdate(double tpf) {
-        velocityY += gravity;
+   @Override
+public void onUpdate(double tpf) {
+    velocityY += gravity;
+    
+    if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
+    if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
+    
+    // 先移動X
+    double oldX = entity.getX();
+    entity.setX(entity.getX() + velocityX);
+    
+    // 檢查X方向碰撞
+    boolean xCollision = false;
+    for (Entity platform : platforms) {
+        if (!platform.hasComponent(PlatformComponent.class)) continue;
         
-        if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
-        if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
+        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), playerRadius, velocityY);
         
-        entity.setX(entity.getX() + velocityX);
-        entity.setY(entity.getY() + velocityY);
-        
-        onGround = false;
-        
-        for (Entity platform : platforms) {
-            if (!platform.hasComponent(PlatformComponent.class)) {
-                continue;
-            }
-            
-            PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-            CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), playerRadius, velocityY);
-            
-            if (collision.collided) {
-                switch (collision.side) {
-                    case TOP:
-                        if (platform.getRotation() != 0) {
-                            double angle = Math.toRadians(-platform.getRotation());
-                            double centerX = platform.getX() + pc.getWidth() / 2;
-                            double centerY = platform.getY() + pc.getHeight() / 2;
-                            
-                            double localY = -pc.getHeight() / 2;
-                            double dx = entity.getX() - centerX;
-                            double localX = dx * Math.cos(angle);
-                            
-                            double worldY = centerY + (localX * Math.sin(angle) + localY * Math.cos(angle));
-                            entity.setY(worldY - playerRadius);
-                        } else {
-                            entity.setY(platform.getY() - playerRadius);
-                        }
-                        
-                        if (velocityY > 0) velocityY = 0;
-                        onGround = true;
-                        break;
-                    case BOTTOM:
-                        entity.setY(platform.getY() + pc.getHeight() + playerRadius);
-                        if (velocityY < 0) velocityY = 0;
-                        break;
-                    case LEFT:
-                        entity.setX(platform.getX() - playerRadius);
-                        velocityX = 0;
-                        break;
-                    case RIGHT:
-                        entity.setX(platform.getX() + pc.getWidth() + playerRadius);
-                        velocityX = 0;
-                        break;
-                }
-            }
-        }
-        
-        if (entity.getX() < LEFT_BOUNDARY) {
-            entity.setX(LEFT_BOUNDARY);
+        if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
+            entity.setX(oldX);  // 恢復到舊位置
             velocityX = 0;
+            xCollision = true;
+            break;
         }
-        if (entity.getX() > RIGHT_BOUNDARY) {
-            entity.setX(RIGHT_BOUNDARY);
-            velocityX = 0;
-        }
-        if (entity.getY() < TOP_BOUNDARY) {
-            entity.setY(TOP_BOUNDARY);
-            velocityY = 0;
-        }
+    }
+    
+    // 再移動Y
+    double oldY = entity.getY();
+    entity.setY(entity.getY() + velocityY);
+    
+    onGround = false;
+    
+    // 檢查Y方向碰撞
+    for (Entity platform : platforms) {
+        if (!platform.hasComponent(PlatformComponent.class)) continue;
         
+        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), playerRadius, velocityY);
+        
+        if (collision.collided) {
+            switch (collision.side) {
+                case TOP:
+                    // 站在平台上
+                    if (Math.abs(platform.getRotation()) > 0.1) {
+                        double surfaceY = pc.getRotatedSurfaceY(entity.getX());
+                        entity.setY(surfaceY - playerRadius);
+                    } else {
+                        entity.setY(platform.getY() - playerRadius);
+                    }
+                    
+                    if (velocityY > 0) velocityY = 0;
+                    onGround = true;
+                    break;
+                    
+                case BOTTOM:
+                    // 頭撞到平台
+                    entity.setY(oldY);  // 恢復位置
+                    if (velocityY < 0) velocityY = 0;
+                    break;
+                    
+                case LEFT:
+                case RIGHT:
+                    // 側邊碰撞（垂直平台）
+                    if (!xCollision) {  // 如果X方向沒處理過
+                        entity.setX(oldX);
+                        velocityX = 0;
+                    }
+                    break;
+            }
+        }
+    }
+    
+    // 邊界檢查
+    if (entity.getX() < LEFT_BOUNDARY) {
+        entity.setX(LEFT_BOUNDARY);
         velocityX = 0;
     }
+    if (entity.getX() > RIGHT_BOUNDARY) {
+        entity.setX(RIGHT_BOUNDARY);
+        velocityX = 0;
+    }
+    if (entity.getY() < TOP_BOUNDARY) {
+        entity.setY(TOP_BOUNDARY);
+        velocityY = 0;
+    }
+    
+    velocityX = 0;
+}
 
     public void moveLeft() {
         velocityX = -speed;
@@ -1286,4 +1883,18 @@ class PlayerControl extends Component {
     public boolean isCrouching() {
         return crouching;
     }
+}
+
+class CollisionInfo {
+    boolean collided;
+    CollisionSide side;
+
+    CollisionInfo(boolean collided, CollisionSide side) {
+        this.collided = collided;
+        this.side = side;
+    }
+}
+
+enum CollisionSide {
+    NONE, TOP, BOTTOM, LEFT, RIGHT
 }
