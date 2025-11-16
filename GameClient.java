@@ -15,7 +15,7 @@ import javafx.geometry.Point2D;
 import java.util.*;
 import java.io.*;
 import java.net.*;
-
+import java.util.AbstractMap;
 /**
  * 多人平台遊戲客戶端（修正版）
  */
@@ -24,7 +24,10 @@ public class GameClient extends GameApplication {
     private Entity player;
     private List<Entity> platformEntities = new ArrayList<>();
     private Map<String, Entity> otherPlayers = new HashMap<>();
-    
+    private Entity middlePlatform;
+    private List<Entity> deathZones = new ArrayList<>();
+    private List<Entity> safeZones = new ArrayList<>(); 
+    private boolean zonesCreated = false;  
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
@@ -520,14 +523,14 @@ public class GameClient extends GameApplication {
     protected void initGame() {
         FXGL.getGameScene().setBackgroundColor(Color.rgb(30, 30, 40));
         createFixedPlatforms();
-        
+        createMiddlePlatform();
         player = FXGL.entityBuilder()
                 .at(100, 900)
                 .view(new Circle(25, myColor))
                 .with(new PlayerControl(platformEntities))
                 .buildAndAttach();
         player.setVisible(false);
-        
+        createGameZones();
         createUI();
         connectToServer();
         startNetworkThread();
@@ -535,27 +538,114 @@ public class GameClient extends GameApplication {
         startPlacementPreviewSender();
         createMainMenu();
     }
+     private void createMiddlePlatform() {
+    // 中間固定平台
+    double midX = SCREEN_WIDTH / 2 - 150;
+    double midY = SCREEN_HEIGHT / 2;
     
-    private void createFixedPlatforms() {
-        startPlatform = createPlatform(50, SCREEN_HEIGHT - 150, 200, 30, Color.GREEN);
-        endPlatform = createPlatform(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 150, 200, 30, Color.GOLD);
-        
-        Text startLabel = new Text("START");
-        startLabel.setFont(Font.font(20));
-        startLabel.setFill(Color.WHITE);
-        FXGL.entityBuilder()
-                .at(110, SCREEN_HEIGHT - 130)
-                .view(startLabel)
-                .buildAndAttach();
-        
-        Text endLabel = new Text("FINISH");
-        endLabel.setFont(Font.font(20));
-        endLabel.setFill(Color.WHITE);
-        FXGL.entityBuilder()
-                .at(SCREEN_WIDTH - 200, SCREEN_HEIGHT - 130)
-                .view(endLabel)
-                .buildAndAttach();
+    middlePlatform = createPlatform(midX, midY, 300, 30, Color.rgb(100, 100, 100));
+    middlePlatform.setVisible(false);
+}
+
+private void createGameZones() {
+    if (zonesCreated) {
+        // 已經創建過，只需要顯示
+        return;
     }
+    
+    // 清除舊的
+    for (Entity zone : deathZones) {
+        zone.removeFromWorld();
+    }
+    deathZones.clear();
+    
+    for (Entity zone : safeZones) {
+        zone.removeFromWorld();
+    }
+    safeZones.clear();
+    
+    Random rand = new Random(12345); // 使用固定種子，確保每個客戶端生成相同的區域
+    
+    // 創建死亡區域（紅色）
+    int numDeathZones = 4 + rand.nextInt(3); // 4-6個
+    for (int i = 0; i < numDeathZones; i++) {
+        double x = 300 + rand.nextInt(SCREEN_WIDTH - 600);
+        double y = 200 + rand.nextInt(SCREEN_HEIGHT - 500);
+        double width = 80 + rand.nextInt(100);
+        double height = 20 + rand.nextInt(15);
+        
+        Rectangle rect = new Rectangle(width, height, Color.rgb(200, 50, 50));
+        rect.setOpacity(0.7);
+        rect.setStroke(Color.RED);
+        rect.setStrokeWidth(2);
+        
+        Entity deathZone = FXGL.entityBuilder()
+                .at(x, y)
+                .view(rect)
+                .with(new DeathZoneComponent(width, height))
+                .buildAndAttach();
+        
+        deathZone.setVisible(false);
+        deathZones.add(deathZone);
+    }
+    
+    // 創建安全區域（白色）
+    int numSafeZones = 3 + rand.nextInt(3); // 3-5個
+    for (int i = 0; i < numSafeZones; i++) {
+        double x = 300 + rand.nextInt(SCREEN_WIDTH - 600);
+        double y = 200 + rand.nextInt(SCREEN_HEIGHT - 500);
+        double width = 100 + rand.nextInt(120);
+        double height = 25 + rand.nextInt(20);
+        
+        Rectangle rect = new Rectangle(width, height, Color.rgb(220, 220, 220));
+        rect.setOpacity(0.8);
+        rect.setStroke(Color.WHITE);
+        rect.setStrokeWidth(2);
+        
+        Entity safeZone = FXGL.entityBuilder()
+                .at(x, y)
+                .view(rect)
+                .with(new PlatformComponent(width, height))  // 白色區域是平台
+                .buildAndAttach();
+        
+        safeZone.setVisible(false);
+        safeZones.add(safeZone);
+        platformEntities.add(safeZone);  // 加入平台列表，可以踩
+    }
+    
+    zonesCreated = true;
+    System.out.println("[CLIENT] Created " + numDeathZones + " death zones and " + 
+                      numSafeZones + " safe zones");
+}   
+
+    private void createFixedPlatforms() {
+    startPlatform = createPlatform(50, SCREEN_HEIGHT - 150, 200, 30, Color.GREEN);
+    endPlatform = createPlatform(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 150, 200, 30, Color.GOLD);
+    
+    Text startLabel = new Text("START");
+    startLabel.setFont(Font.font(20));
+    startLabel.setFill(Color.WHITE);
+    Entity startLabelEntity = FXGL.entityBuilder()
+            .at(110, SCREEN_HEIGHT - 130)
+            .view(startLabel)
+            .buildAndAttach();
+    platformEntities.add(startLabelEntity);  // 加入列表以便管理
+    
+    Text endLabel = new Text("FINISH");
+    endLabel.setFont(Font.font(20));
+    endLabel.setFill(Color.WHITE);
+    Entity endLabelEntity = FXGL.entityBuilder()
+            .at(SCREEN_WIDTH - 200, SCREEN_HEIGHT - 130)
+            .view(endLabel)
+            .buildAndAttach();
+    platformEntities.add(endLabelEntity);  // 加入列表以便管理
+    
+    // 初始時隱藏
+    startPlatform.setVisible(false);
+    endPlatform.setVisible(false);
+    startLabelEntity.setVisible(false);
+    endLabelEntity.setVisible(false);
+}
     
     private void createUI() {
         phaseText = new Text("Phase: SELECTING");
@@ -678,14 +768,17 @@ public class GameClient extends GameApplication {
     }
     
 private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
-    System.out.println("[CLIENT] Showing leaderboard with " + finishOrder.size() + " players");
+    System.out.println("[CLIENT] Showing leaderboard with " + finishOrder.size() + " players, currentRound=" + 
+                      (currentRoomInfo != null ? currentRoomInfo.currentRound : "null"));
+    
     hideLeaderboard();
     
-
     // 隱藏遊戲UI
     phaseText.setVisible(false);
     timerText.setVisible(false);
     scoreText.setVisible(false);
+    
+    // 背景
     Rectangle bg = new Rectangle(700, 600, Color.rgb(40, 40, 50, 0.95));
     bg.setStroke(Color.GOLD);
     bg.setStrokeWidth(4);
@@ -701,6 +794,8 @@ private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integ
                       " / " + (currentRoomInfo != null ? currentRoomInfo.totalRounds : "5") + 
                       " COMPLETE!";
     
+    System.out.println("[CLIENT] Leaderboard title: " + roundInfo);
+    
     Text title = new Text(roundInfo);
     title.setFont(Font.font(36));
     title.setFill(Color.GOLD);
@@ -710,9 +805,17 @@ private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integ
             .buildAndAttach();
     leaderboardEntities.add(titleEntity);
     
+    // 按總分排序玩家
+    List<Map.Entry<String, Integer>> sortedPlayers = new ArrayList<>();
+    for (String playerId : finishOrder) {
+        sortedPlayers.add(new AbstractMap.SimpleEntry<>(playerId, totalScores.getOrDefault(playerId, 0)));
+    }
+    sortedPlayers.sort((a, b) -> b.getValue().compareTo(a.getValue())); // 從高到低排序
+    
+    // 顯示排序後的玩家
     int yOffset = -140;
-    for (int i = 0; i < finishOrder.size(); i++) {
-        String playerId = finishOrder.get(i);
+    for (int i = 0; i < sortedPlayers.size(); i++) {
+        String playerId = sortedPlayers.get(i).getKey();
         int roundScore = roundScores.getOrDefault(playerId, 0);
         int totalScore = totalScores.getOrDefault(playerId, 0);
         
@@ -722,12 +825,12 @@ private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integ
         Text scoreText = new Text(rank + scoreInfo);
         scoreText.setFont(Font.font(22));
         
-        // 高亮顯示自己
+        // 只有自己是黃色，其他都是白色
         if (playerId.equals(myPlayerId)) {
             scoreText.setFill(Color.YELLOW);
             scoreText.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 24));
         } else {
-            scoreText.setFill(i == 0 ? Color.GOLD : Color.WHITE);
+            scoreText.setFill(Color.WHITE);
         }
         
         Entity scoreEntity = FXGL.entityBuilder()
@@ -752,8 +855,9 @@ private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integ
             .view(hint)
             .buildAndAttach();
     leaderboardEntities.add(hintEntity);
-}    
-
+    
+    System.out.println("[CLIENT] Leaderboard created with " + leaderboardEntities.size() + " entities");
+}
 private void hideLeaderboard() {
     System.out.println("[CLIENT] Hiding leaderboard, entities: " + leaderboardEntities.size());
     
@@ -855,6 +959,7 @@ private void hideLeaderboard() {
         showLeaderboard(roundEndMsg.roundScores, roundEndMsg.totalScores, 
                        roundEndMsg.finishOrder);
     });
+    
 }      
                     else if (obj instanceof CreateRoomResponse createResp) {
                         javafx.application.Platform.runLater(() -> {
@@ -955,7 +1060,7 @@ private void hideLeaderboard() {
                 try {
                     // 只在遊戲中且玩家可見時發送位置
                     if (connected && currentPhase == GamePhase.PLAYING && 
-                        player != null && player.isVisible() && !hasFinished && !hasFailed) {
+                        player != null && player.isVisible() ) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
                             PlayerInfo info = new PlayerInfo(
@@ -1031,6 +1136,14 @@ private void handlePhaseChange(GamePhase newPhase) {
             phaseText.setText("Phase: SELECT YOUR PLATFORM");
             phaseText.setVisible(true);
             player.setVisible(false);
+            // 隱藏起點和終點平台
+            startPlatform.setVisible(false);
+            endPlatform.setVisible(false);
+            if (platformEntities.size() > 2) {
+                platformEntities.get(2).setVisible(false); // START label
+                platformEntities.get(3).setVisible(false); // FINISH label
+            }
+      
             selectedObjectId = null;
             selectedObj = null;
             myPlacement = null;
@@ -1080,7 +1193,21 @@ private void handlePhaseChange(GamePhase newPhase) {
             scoreText.setVisible(false);
             hideFinishButton();
             isDragging = false;
+
+            startPlatform.setVisible(true);
+            endPlatform.setVisible(true);
+            middlePlatform.setVisible(true);
+            if (platformEntities.size() > 2) {
+                platformEntities.get(2).setVisible(true); // START label
+                platformEntities.get(3).setVisible(true); // FINISH label
+            }
             
+             for (Entity zone : deathZones) {
+        zone.setVisible(true);
+            }
+            for (Entity zone : safeZones) {
+                zone.setVisible(true);
+            }
             if (previewPlatform != null) {
                 previewPlatform.removeFromWorld();
                 previewPlatform = null;
@@ -1125,7 +1252,10 @@ private void handlePhaseChange(GamePhase newPhase) {
             
             Entity preview = otherPreviewEntities.remove(msg.playerId);
             if (preview != null) {
-                preview.removeFromWorld();
+                javafx.scene.shape.Rectangle rect = (javafx.scene.shape.Rectangle) preview.getViewComponent().getChildren().get(0);
+                rect.setOpacity(0.3);  // 更透明
+                rect.setStroke(Color.GREEN);  // 綠色邊框
+                rect.setStrokeWidth(3);
             }
             otherPreviewPlacements.remove(msg.playerId);
         } else {
@@ -1548,49 +1678,70 @@ private void handlePhaseChange(GamePhase newPhase) {
             timerText.setText("");
         }
         
-        // 檢查是否到達終點
-        if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
-            double playerX = player.getX();
-            double playerY = player.getY();
-            double endX = endPlatform.getX();
-            double endY = endPlatform.getY();
-            
-            if (playerX >= endX && playerX <= endX + 200 &&
-                playerY >= endY - 50 && playerY <= endY + 30) {
-                
-                try {
-                    long finishTime = System.currentTimeMillis() - gameStartTime;
-                    synchronized (out) {
-                        out.writeObject(new FinishMessage(myPlayerId, finishTime));
-                        out.flush();
-                        out.reset();
+        // 檢查是否到達終點或死亡
+    if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+        double playerX = player.getX();
+        double playerY = player.getY();
+        
+        // 檢查死亡區域
+        for (Entity zone : deathZones) {
+            if (zone.isVisible() && zone.hasComponent(DeathZoneComponent.class)) {
+                DeathZoneComponent dzc = zone.getComponent(DeathZoneComponent.class);
+                if (dzc.checkCollision(playerX, playerY, 25)) {
+                    try {
+                        synchronized (out) {
+                            out.writeObject(new FailMessage(myPlayerId));
+                            out.flush();
+                            out.reset();
+                        }
+                        hasFailed = true;
+                        // player.setVisible(false);
+                        System.out.println("[CLIENT] Touched death zone!");
+                    } catch (Exception e) {
+                        System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
                     }
-                    hasFinished = true;
-                    System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms");
-                    // 不隱藏玩家，讓玩家停留在終點
-                } catch (Exception e) {
-                    System.err.println("[CLIENT ERROR] Failed to send finish message: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-            
-            // 檢查是否掉出地圖
-            if (playerY > SCREEN_HEIGHT + 100) {
-                try {
-                    synchronized (out) {
-                        out.writeObject(new FailMessage(myPlayerId));
-                        out.flush();
-                        out.reset();
-                    }
-                    hasFailed = true;
-                    player.setVisible(false);
-                    System.out.println("[CLIENT] Failed - fell off map");
-                } catch (Exception e) {
-                    System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
-                    e.printStackTrace();
+                    return; // 立即返回，不再檢查其他
                 }
             }
         }
+        
+        // 檢查終點
+        double endX = endPlatform.getX();
+        double endY = endPlatform.getY();
+        
+        if (playerX >= endX && playerX <= endX + 200 &&
+            playerY >= endY - 50 && playerY <= endY + 30) {
+            
+            try {
+                long finishTime = System.currentTimeMillis() - gameStartTime;
+                synchronized (out) {
+                    out.writeObject(new FinishMessage(myPlayerId, finishTime));
+                    out.flush();
+                    out.reset();
+                }
+                hasFinished = true;
+                System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms");
+            } catch (Exception e) {
+                System.err.println("[CLIENT ERROR] Failed to send finish message: " + e.getMessage());
+            }
+        }
+        
+        // 檢查掉出地圖
+        if (playerY > SCREEN_HEIGHT + 100) {
+            try {
+                synchronized (out) {
+                    out.writeObject(new FailMessage(myPlayerId));
+                    out.flush();
+                    out.reset();
+                }
+                hasFailed = true;
+                player.setVisible(false);
+                System.out.println("[CLIENT] Failed - fell off map");
+            } catch (Exception e) {
+                System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
+            }
+        }
+    }
     }
     
     private void cleanup() {
@@ -1844,7 +1995,6 @@ class PlayerControl extends Component {
         onGround = false;
         crouching = false;
     }
-
    @Override
 public void onUpdate(double tpf) {
     velocityY += gravity;
@@ -1972,4 +2122,33 @@ class CollisionInfo {
 
 enum CollisionSide {
     NONE, TOP, BOTTOM, LEFT, RIGHT
+}
+/**
+ * 死亡區域組件
+ */
+class DeathZoneComponent extends Component {
+    private double width;
+    private double height;
+    
+    public DeathZoneComponent(double width, double height) {
+        this.width = width;
+        this.height = height;
+    }
+    
+    public boolean checkCollision(double playerX, double playerY, double radius) {
+        double zoneLeft = entity.getX();
+        double zoneRight = entity.getX() + width;
+        double zoneTop = entity.getY();
+        double zoneBottom = entity.getY() + height;
+        
+        double playerLeft = playerX - radius;
+        double playerRight = playerX + radius;
+        double playerTop = playerY - radius;
+        double playerBottom = playerY + radius;
+        
+        return !(playerRight < zoneLeft || 
+                 playerLeft > zoneRight || 
+                 playerBottom < zoneTop || 
+                 playerTop > zoneBottom);
+    }
 }

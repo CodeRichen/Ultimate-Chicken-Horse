@@ -318,15 +318,15 @@ else if (obj instanceof JoinRandomRoomRequest) {
                         }
                     else if (currentPhase == GamePhase.PLAYING) {
                         long elapsed = System.currentTimeMillis() - gameStartTime;
-System.out.println("[DEBUG] completedPlayers=" + currentRoom.completedPlayers);
-                    System.out.println("[DEBUG] failedPlayers=" + currentRoom.failedPlayers);
+// System.out.println("[DEBUG] completedPlayers=" + currentRoom.completedPlayers);
+                    // System.out.println("[DEBUG] failedPlayers=" + currentRoom.failedPlayers);
                         boolean allFinished = currentRoom.completedPlayers.size() == currentRoom.getPlayerIds().size();
                         boolean allFailed = currentRoom.failedPlayers.size() == currentRoom.getPlayerIds().size();
                         boolean timeUp = elapsed >= GAME_DURATION;
                     
-                     System.out.println("[DEBUG] allFinished=" + allFinished +
-                                       ", allFailed=" + allFailed +
-                                       ", timeUp=" + timeUp);
+                    //  System.out.println("[DEBUG] allFinished=" + allFinished +
+                    //                    ", allFailed=" + allFailed +
+                    //                    ", timeUp=" + timeUp);
                         if (allFinished || allFailed || timeUp) {
                             System.out.println("[ROUND] Ending round - " +
                                 (allFinished ? "all finished" : allFailed ? "all failed" : "time up"));
@@ -397,7 +397,7 @@ currentRoom.getInfo().totalRounds
             // 等待後決定下一步
             new Thread(() -> {
                 try {
-                    Thread.sleep(10000); // 10秒顯示排行榜
+                    Thread.sleep(3000); // 3秒顯示排行榜
                     
                     if (currentRoom == null) return;
                     
