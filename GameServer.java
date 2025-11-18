@@ -777,8 +777,11 @@ class Room {
         synchronized (lock) {
             info.state = RoomState.PLAYING;
             info.currentRound = 1;
+            // 清空舊遊戲的分數
+            playerTotalScores.clear();
             for (String pid : info.playerIds) {
                 info.readyStatus.put(pid, false);
+                playerTotalScores.put(pid, 0);
             }
         }
     }
