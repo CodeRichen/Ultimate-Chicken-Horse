@@ -32,12 +32,19 @@ public class MapEditorGUI extends Application {
     // 繪製模式
     private String currentMode = "NORMAL";
     private boolean isDragging = false;
+    private boolean isDraggingPlatform = false;
     private double dragStartX, dragStartY;
     private double dragEndX, dragEndY;
+    private double platformDragOffsetX, platformDragOffsetY;
     
     // 選中的平台
     private MapPlatform selectedPlatform = null;
     private int selectedIndex = -1;
+    
+    // 歷史記錄 (用於 Undo)
+    private List<List<MapPlatform>> history = new ArrayList<>();
+    private int historyIndex = -1;
+    private static final int MAX_HISTORY = 50;
     
     // UI 元素
     private Label statusLabel;
@@ -88,6 +95,22 @@ public class MapEditorGUI extends Application {
         redraw();
         
         Scene scene = new Scene(root, 1600, 650);
+        
+        // 設置鍵盤事件
+        scene.setOnKeyPressed(e -> {
+            switch (e.getCode()) {
+                case DELETE:
+                case BACK_SPACE:
+                    deleteSelected();
+                    break;
+                case Z:
+                    if (e.isControlDown()) {
+                        undo();
+                    }
+                    break;
+            }
+        });
+        
         primaryStage.setTitle("地圖編輯器 - 拖曳創建平台");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -119,16 +142,16 @@ public class MapEditorGUI extends Application {
         typeCombo.setOnAction(e -> updateMode());
         
         // 寬度設置
-        Label widthLabel = new Label("寬度 (50-300):");
+        Label widthLabel = new Label("寬度 (無限制):");
         widthLabel.setStyle("-fx-text-fill: white;");
-        widthSpinner = new Spinner<>(50, 300, 150, 10);
+        widthSpinner = new Spinner<>(10, 10000, 150, 10);
         widthSpinner.setEditable(true);
         widthSpinner.setMaxWidth(Double.MAX_VALUE);
         
         // 高度設置
-        Label heightLabel = new Label("高度 (15-50):");
+        Label heightLabel = new Label("高度 (無限制):");
         heightLabel.setStyle("-fx-text-fill: white;");
-        heightSpinner = new Spinner<>(15, 50, 20, 5);
+        heightSpinner = new Spinner<>(10, 2000, 20, 5);
         heightSpinner.setEditable(true);
         heightSpinner.setMaxWidth(Double.MAX_VALUE);
         
@@ -146,13 +169,14 @@ public class MapEditorGUI extends Application {
         instructionLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: white;");
         
         TextArea instructions = new TextArea(
-            "• 按住滑鼠左鍵拖曳創建平台\n" +
-            "• 點擊右鍵選擇平台\n" +
-            "• 選中平台後可調整參數\n" +
-            "• Delete 鍵刪除選中平台\n" +
-            "• 起點(綠色)在左側\n" +
-            "• 終點(金色)在右側\n" +
-            "• 地圖範圍: 0-4800"
+            "• 按住滑鼠左鍵拖曳矩形區域\n" +
+            "  拖曳的範圍即為平台大小\n" +
+            "• 點擊平台選中，拖曳移動\n" +
+            "• Delete/Backspace 刪除選中\n" +
+            "• Ctrl+Z 撤銷上一步\n" +
+            "• 起點(綠線): X=50\n" +
+            "• 終點(金線): X=4600\n" +
+            "• 可達範圍: 0-4800 x 0-700"
         );
         instructions.setEditable(false);
         instructions.setPrefRowCount(8);
@@ -187,6 +211,11 @@ public class MapEditorGUI extends Application {
         deleteButton.setStyle("-fx-background-color: #9C27B0; -fx-text-fill: white; -fx-font-weight: bold;");
         deleteButton.setOnAction(e -> deleteSelected());
         
+        Button undoButton = new Button("↺ 撤銷 (Ctrl+Z)");
+        undoButton.setMaxWidth(Double.MAX_VALUE);
+        undoButton.setStyle("-fx-background-color: #607D8B; -fx-text-fill: white; -fx-font-weight: bold;");
+        undoButton.setOnAction(e -> undo());
+        
         panel.getChildren().addAll(
             title,
             typeLabel, typeCombo,
@@ -196,7 +225,7 @@ public class MapEditorGUI extends Application {
             sep1,
             instructionLabel, instructions,
             sep2,
-            saveButton, loadButton, clearButton, defaultButton, deleteButton
+            saveButton, loadButton, clearButton, defaultButton, deleteButton, undoButton
         );
         
         return panel;
@@ -236,15 +265,26 @@ public class MapEditorGUI extends Application {
         double worldY = e.getY() / SCALE;
         
         if (e.getButton() == MouseButton.PRIMARY) {
-            // 左鍵：開始拖曳創建平台
-            isDragging = true;
-            dragStartX = worldX;
-            dragStartY = worldY;
-            dragEndX = worldX;
-            dragEndY = worldY;
-            selectedPlatform = null;
-            selectedIndex = -1;
-            statusLabel.setText("拖曳創建平台...");
+            // 左鍵：先嘗試選中平台
+            boolean platformClicked = selectPlatform(worldX, worldY);
+            
+            if (platformClicked && selectedPlatform != null) {
+                // 點擊到平台，準備拖曳移動
+                isDraggingPlatform = true;
+                platformDragOffsetX = worldX - selectedPlatform.x;
+                platformDragOffsetY = worldY - selectedPlatform.y;
+                statusLabel.setText("拖曳移動平台...");
+            } else {
+                // 沒有點擊到平台，開始拖曳創建新平台
+                isDragging = true;
+                dragStartX = worldX;
+                dragStartY = worldY;
+                dragEndX = worldX;
+                dragEndY = worldY;
+                selectedPlatform = null;
+                selectedIndex = -1;
+                statusLabel.setText("拖曳創建平台...");
+            }
         } else if (e.getButton() == MouseButton.SECONDARY) {
             // 右鍵：選擇平台
             selectPlatform(worldX, worldY);
@@ -254,9 +294,18 @@ public class MapEditorGUI extends Application {
     }
     
     private void handleMouseDragged(MouseEvent e) {
+        double worldX = e.getX() / SCALE;
+        double worldY = e.getY() / SCALE;
+        
         if (isDragging) {
-            dragEndX = e.getX() / SCALE;
-            dragEndY = e.getY() / SCALE;
+            // 拖曳創建新平台
+            dragEndX = worldX;
+            dragEndY = worldY;
+            redraw();
+        } else if (isDraggingPlatform && selectedPlatform != null) {
+            // 拖曳移動現有平台
+            selectedPlatform.x = worldX - platformDragOffsetX;
+            selectedPlatform.y = worldY - platformDragOffsetY;
             redraw();
         }
     }
@@ -281,6 +330,11 @@ public class MapEditorGUI extends Application {
             
             isDragging = false;
             redraw();
+        } else if (isDraggingPlatform && e.getButton() == MouseButton.PRIMARY) {
+            // 平台移動完成，保存到歷史
+            saveToHistory();
+            isDraggingPlatform = false;
+            statusLabel.setText("✓ 平台已移動");
         }
     }
     
@@ -295,17 +349,23 @@ public class MapEditorGUI extends Application {
         String color = getColorForType(typeStr);
         double rotation = rotationSpinner.getValue();
         
-        // 使用 Spinner 的值
-        width = widthSpinner.getValue();
-        height = heightSpinner.getValue();
+        // 使用拖曳的實際大小，而不是 Spinner 的值
+        // width 和 height 參數已經是拖曳區域的大小
         
         MapPlatform platform = new MapPlatform(x, y, width, height, color, rotation, typeStr);
         mapConfig.addPlatform(platform);
         
+        // 更新 Spinner 顯示當前創建的大小
+        widthSpinner.getValueFactory().setValue(width);
+        heightSpinner.getValueFactory().setValue(height);
+        
+        // 保存到歷史
+        saveToHistory();
+        
         System.out.println("已創建平台: " + platform);
     }
     
-    private void selectPlatform(double worldX, double worldY) {
+    private boolean selectPlatform(double worldX, double worldY) {
         List<MapPlatform> platforms = mapConfig.getPlatforms();
         
         for (int i = platforms.size() - 1; i >= 0; i--) {
@@ -323,7 +383,7 @@ public class MapEditorGUI extends Application {
                 rotationSpinner.getValueFactory().setValue(p.rotation);
                 
                 redraw();
-                return;
+                return true;
             }
         }
         
@@ -332,11 +392,13 @@ public class MapEditorGUI extends Application {
         selectedIndex = -1;
         statusLabel.setText("未選中任何平台");
         redraw();
+        return false;
     }
     
     private void deleteSelected() {
         if (selectedIndex >= 0) {
             mapConfig.removePlatform(selectedIndex);
+            saveToHistory();
             statusLabel.setText("✓ 已刪除平台 #" + selectedIndex);
             selectedPlatform = null;
             selectedIndex = -1;
@@ -387,13 +449,41 @@ public class MapEditorGUI extends Application {
             gc.strokeLine(0, i, CANVAS_WIDTH, i);
         }
         
-        // 繪製起點和終點參考線
-        gc.setStroke(Color.LIGHTGREEN);
-        gc.setLineWidth(2);
-        gc.strokeLine(50 * SCALE, 0, 50 * SCALE, CANVAS_HEIGHT);
+        // 繪製可達範圍框(整個地圖範圍)
+        gc.setStroke(Color.CYAN);
+        gc.setLineWidth(3);
+        gc.setLineDashes(10, 5);
+        gc.strokeRect(0, 0, MAP_WIDTH * SCALE, MAP_HEIGHT * SCALE);
+        gc.setLineDashes(0);
         
+        // 繪製起點參考線 (X=50)
+        gc.setStroke(Color.LIGHTGREEN);
+        gc.setLineWidth(4);
+        double startX = 50 * SCALE;
+        gc.strokeLine(startX, 0, startX, CANVAS_HEIGHT);
+        
+        // 起點標籤和區域
+        gc.setFill(Color.LIGHTGREEN);
+        gc.fillText("起點 (X=50)", startX + 5, 20);
+        gc.setFill(Color.rgb(144, 238, 144, 0.2));
+        gc.fillRect(0, 0, startX, CANVAS_HEIGHT);
+        
+        // 繪製終點參考線 (X=4600)
         gc.setStroke(Color.GOLD);
-        gc.strokeLine((4800 - 200) * SCALE, 0, (4800 - 200) * SCALE, CANVAS_HEIGHT);
+        gc.setLineWidth(4);
+        double endX = 4600 * SCALE;
+        gc.strokeLine(endX, 0, endX, CANVAS_HEIGHT);
+        
+        // 終點標籤和區域
+        gc.setFill(Color.GOLD);
+        gc.fillText("終點 (X=4600)", endX - 100, 20);
+        gc.setFill(Color.rgb(255, 215, 0, 0.2));
+        gc.fillRect(endX, 0, (MAP_WIDTH - 4600) * SCALE, CANVAS_HEIGHT);
+        
+        // 繪製地圖範圍標註
+        gc.setFill(Color.WHITE);
+        gc.setFont(javafx.scene.text.Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 14));
+        gc.fillText("可達範圍: 0 - 4800 (寬) × 0 - 700 (高)", 10, CANVAS_HEIGHT - 10);
         
         // 繪製所有平台
         List<MapPlatform> platforms = mapConfig.getPlatforms();
@@ -526,8 +616,53 @@ public class MapEditorGUI extends Application {
             mapConfig.createDefaultMap();
             selectedPlatform = null;
             selectedIndex = -1;
+            saveToHistory();
             redraw();
             statusLabel.setText("✓ 已創建預設地圖");
+        }
+    }
+    
+    // 歷史記錄管理
+    private void saveToHistory() {
+        // 創建當前狀態的深拷貝
+        List<MapPlatform> snapshot = new ArrayList<>();
+        for (MapPlatform p : mapConfig.getPlatforms()) {
+            snapshot.add(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type));
+        }
+        
+        // 如果不在歷史末尾，清除後續歷史
+        while (historyIndex < history.size() - 1) {
+            history.remove(history.size() - 1);
+        }
+        
+        // 添加新狀態
+        history.add(snapshot);
+        historyIndex++;
+        
+        // 限制歷史記錄數量
+        if (history.size() > MAX_HISTORY) {
+            history.remove(0);
+            historyIndex--;
+        }
+    }
+    
+    private void undo() {
+        if (historyIndex > 0) {
+            historyIndex--;
+            List<MapPlatform> previousState = history.get(historyIndex);
+            
+            // 恢復到之前的狀態
+            mapConfig.clearPlatforms();
+            for (MapPlatform p : previousState) {
+                mapConfig.addPlatform(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type));
+            }
+            
+            selectedPlatform = null;
+            selectedIndex = -1;
+            redraw();
+            statusLabel.setText("↶ 已撤銷，回到步驟 " + historyIndex);
+        } else {
+            statusLabel.setText("沒有可撤銷的操作");
         }
     }
     

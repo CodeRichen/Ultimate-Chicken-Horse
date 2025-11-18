@@ -556,74 +556,10 @@ public class GameClient extends GameApplication {
 }
 
 private void createGameZones() {
-    if (zonesCreated) {
-        // 已經創建過，只需要顯示
-        return;
-    }
-    
-    // 清除舊的
-    for (Entity zone : deathZones) {
-        zone.removeFromWorld();
-    }
-    deathZones.clear();
-    
-    for (Entity zone : safeZones) {
-        zone.removeFromWorld();
-    }
-    safeZones.clear();
-    
-    Random rand = new Random(12345); // 使用固定種子，確保每個客戶端生成相同的區域
-    
-    // 創建死亡區域（紅色）
-    int numDeathZones = 4 + rand.nextInt(3); // 4-6個
-    for (int i = 0; i < numDeathZones; i++) {
-        double x = 300 + rand.nextInt(SCREEN_WIDTH - 600);
-        double y = 200 + rand.nextInt(SCREEN_HEIGHT - 500);
-        double width = 80 + rand.nextInt(100);
-        double height = 20 + rand.nextInt(15);
-        
-        Rectangle rect = new Rectangle(width, height, Color.rgb(200, 50, 50));
-        rect.setOpacity(0.7);
-        rect.setStroke(Color.RED);
-        rect.setStrokeWidth(2);
-        
-        Entity deathZone = FXGL.entityBuilder()
-                .at(x, y)
-                .view(rect)
-                .with(new DeathZoneComponent(width, height))
-                .buildAndAttach();
-        
-        deathZone.setVisible(false);
-        deathZones.add(deathZone);
-    }
-    
-    // 創建安全區域（白色）
-    int numSafeZones = 3 + rand.nextInt(3); // 3-5個
-    for (int i = 0; i < numSafeZones; i++) {
-        double x = 300 + rand.nextInt(SCREEN_WIDTH - 600);
-        double y = 200 + rand.nextInt(SCREEN_HEIGHT - 500);
-        double width = 100 + rand.nextInt(120);
-        double height = 25 + rand.nextInt(20);
-        
-        Rectangle rect = new Rectangle(width, height, Color.rgb(220, 220, 220));
-        rect.setOpacity(0.8);
-        rect.setStroke(Color.WHITE);
-        rect.setStrokeWidth(2);
-        
-        Entity safeZone = FXGL.entityBuilder()
-                .at(x, y)
-                .view(rect)
-                .with(new PlatformComponent(width, height))  // 白色區域是平台
-                .buildAndAttach();
-        
-        safeZone.setVisible(false);
-        safeZones.add(safeZone);
-        platformEntities.add(safeZone);  // 加入平台列表，可以踩
-    }
-    
+    // 不再生成隨機死亡區和安全區
+    // 所有區域都由地圖編輯器創建
     zonesCreated = true;
-    System.out.println("[CLIENT] Created " + numDeathZones + " death zones and " + 
-                      numSafeZones + " safe zones");
+    System.out.println("[CLIENT] Game zones initialization complete (no random zones)");
 }   
 
     private void createFixedPlatforms() {
@@ -1265,12 +1201,9 @@ private void handlePhaseChange(GamePhase newPhase) {
                 platformEntities.get(3).setVisible(true); // FINISH label
             }
             
-             for (Entity zone : deathZones) {
-        zone.setVisible(true);
-            }
-            for (Entity zone : safeZones) {
-                zone.setVisible(true);
-            }
+            // 不顯示隨機 death zones 和 safe zones，它們已經不存在
+            // 所有障礙物都來自地圖編輯器
+            
             if (previewPlatform != null) {
                 previewPlatform.removeFromWorld();
                 previewPlatform = null;
@@ -1282,19 +1215,27 @@ private void handlePhaseChange(GamePhase newPhase) {
             otherPreviewEntities.clear();
             
             // 創建所有玩家本回合放置的物件（依照物件類型建立行為）
-            System.out.println("[CLIENT] Creating placed objects: my=" + (myPlacement != null) + 
-                             " others=" + otherPlacements.size());
+            System.out.println("[CLIENT] ========== PLAYING Phase Objects ==========");
+            System.out.println("[CLIENT] Total map platforms loaded: " + (mapPlatformsLoaded ? "Yes" : "No"));
+            System.out.println("[CLIENT] Current platformEntities count: " + platformEntities.size());
+            System.out.println("[CLIENT] Player placed objects to create:");
+            System.out.println("[CLIENT]   - My placement: " + (myPlacement != null));
+            System.out.println("[CLIENT]   - Other placements: " + otherPlacements.size());
+            
             for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
                 PlatformPlacement p = entry.getValue();
-                System.out.println("[CLIENT] Creating object for " + entry.getKey() + 
-                                 " at (" + p.x + "," + p.y + ") rotation=" + p.rotation + " id=" + p.id);
+                System.out.println("[CLIENT] Creating OTHER player object: player=" + entry.getKey() + 
+                                 ", id=" + p.id + ", at (" + p.x + "," + p.y + "), rotation=" + p.rotation);
                 createPlacedObject(p);
             }
             if (myPlacement != null) {
-                System.out.println("[CLIENT] Creating my object at (" + myPlacement.x + "," +
-                                 myPlacement.y + ") rotation=" + myPlacement.rotation + " id=" + myPlacement.id);
+                System.out.println("[CLIENT] Creating MY object: id=" + myPlacement.id + 
+                                 ", at (" + myPlacement.x + "," + myPlacement.y + "), rotation=" + myPlacement.rotation);
                 createPlacedObject(myPlacement);
             }
+            
+            System.out.println("[CLIENT] After creating placed objects, platformEntities count: " + platformEntities.size());
+            System.out.println("[CLIENT] =============================================");
             
             otherPlacements.clear();
             
@@ -1423,10 +1364,75 @@ private void handlePhaseChange(GamePhase newPhase) {
         Color color = Color.web(p.color);
         Rectangle rect = new Rectangle(p.width, p.height, color);
         Entity e;
+        
+        // 詳細日誌：顯示正在創建的物件
+        System.out.println("[CLIENT] Creating object: id=" + p.id + ", color=" + p.color + 
+                         ", pos=(" + p.x + "," + p.y + "), size=" + p.width + "x" + p.height + 
+                         ", hasInfo=" + (info != null) + (info != null ? ", type=" + info.type : ""));
+        
+        // 如果沒有 info，說明這是地圖平台，根據顏色決定類型
         if (info == null) {
-            // Fallback to simple platform
-            return createPlatformWithRotation(p.x, p.y, p.width, p.height, color, p.rotation);
+            System.out.println("[CLIENT] No info found, treating as map platform");
+            
+            // 根據顏色判斷平台類型
+            if (p.color.equalsIgnoreCase("#FF0000")) {
+                // 紅色 = 死亡區
+                System.out.println("[CLIENT] Creating DEATH platform from map");
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new DeathZoneComponent(p.width, p.height))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                deathZones.add(e);
+                platformEntities.add(e);
+                return e;
+            } else if (p.color.equalsIgnoreCase("#00FF00")) {
+                // 綠色 = 彈跳
+                System.out.println("[CLIENT] Creating BOUNCE platform from map");
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new BouncePlatformComponent())
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            } else if (p.color.equalsIgnoreCase("#00AAFF")) {
+                // 藍色 = 水平移動
+                System.out.println("[CLIENT] Creating MOVING_H platform from map");
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new MovingPlatformComponent(true, 1.0, 100))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            } else if (p.color.equalsIgnoreCase("#AA00FF")) {
+                // 紫色 = 垂直移動
+                System.out.println("[CLIENT] Creating MOVING_V platform from map");
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new MovingPlatformComponent(false, 1.0, 100))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            } else {
+                // 預設為普通平台
+                System.out.println("[CLIENT] Creating NORMAL platform from map");
+                return createPlatformWithRotation(p.x, p.y, p.width, p.height, color, p.rotation);
+            }
         }
+        
+        // 有 info，說明是玩家選擇的物件
+        System.out.println("[CLIENT] Creating player-selected object of type: " + info.type);
         switch (info.type) {
             case MOVING_H: {
                 e = FXGL.entityBuilder()
@@ -1853,10 +1859,20 @@ private void handlePhaseChange(GamePhase newPhase) {
             );
         }
         if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
-            double targetCameraX = player.getX() - SCREEN_WIDTH / 3.0;
-            double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
-            cameraOffsetX = Math.max(0, Math.min(maxOffset, targetCameraX));
-            FXGL.getGameScene().getViewport().setX(cameraOffsetX);
+            // 如果玩家已完成，強制攝影機保持在最左邊
+            if (hasFinished) {
+                if (cameraOffsetX != 0) {
+                    cameraOffsetX = 0;
+                    FXGL.getGameScene().getViewport().setX(0);
+                    System.out.println("[CLIENT] Forced camera to X=0 (player finished)");
+                }
+            } else {
+                // 正常遊戲中，攝影機跟隨玩家
+                double targetCameraX = player.getX() - SCREEN_WIDTH / 3.0;
+                double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
+                cameraOffsetX = Math.max(0, Math.min(maxOffset, targetCameraX));
+                FXGL.getGameScene().getViewport().setX(cameraOffsetX);
+            }
         }
 
 
@@ -1941,7 +1957,16 @@ private void handlePhaseChange(GamePhase newPhase) {
                     out.reset();
                 }
                 hasFinished = true;
-                System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms");
+                
+                // 到達終點時徹底重置攝影機
+                System.out.println("[CLIENT] Resetting camera to left (cameraOffsetX: " + cameraOffsetX + " -> 0)");
+                cameraOffsetX = 0;
+                FXGL.getGameScene().getViewport().setX(0);
+                
+                // 禁用玩家移動
+                player.getComponent(PlayerControl.class).setEnabled(false);
+                
+                System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms, Camera reset to X=0");
             } catch (Exception e) {
                 System.err.println("[CLIENT ERROR] Failed to send finish message: " + e.getMessage());
             }
@@ -2149,6 +2174,7 @@ class PlayerControl extends Component {
     private boolean crouching = false;
     private List<Entity> platforms;
     private double playerRadius = 25;
+    private boolean enabled = true;  // 控制玩家是否可移動
     
     private final double LEFT_BOUNDARY = playerRadius;
     private final double RIGHT_BOUNDARY = 5000 - playerRadius; // 使用整個關卡寬度 FINISH_X
@@ -2159,14 +2185,25 @@ class PlayerControl extends Component {
         this.platforms = platforms;
     }
     
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        if (!enabled) {
+            velocityX = 0;
+            velocityY = 0;
+        }
+    }
+    
     public void reset() {
         velocityX = 0;
         velocityY = 0;
         onGround = false;
         crouching = false;
+        enabled = true;
     }
    @Override
 public void onUpdate(double tpf) {
+    if (!enabled) return;  // 如果禁用，不處理任何移動
+    
     velocityY += gravity;
     
     if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;

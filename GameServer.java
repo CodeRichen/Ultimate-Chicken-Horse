@@ -227,7 +227,7 @@ else if (obj instanceof JoinRandomRoomRequest) {
          */
                 private void startNewRound() {
                     if (currentRoom == null) return;
-                    // 生成新物件並保存到房間共享狀態
+                    // 生成供玩家選擇的物件
                     List<GameObjectInfo> newList = generateNewObjects();
                     synchronized (currentRoom) {
                         currentRoom.availableObjects.clear();
@@ -242,7 +242,7 @@ else if (obj instanceof JoinRandomRoomRequest) {
             currentRoom.failedPlayers.clear();
             currentRoom.completedPlayers.clear();
             
-            // 發送選擇階段訊息
+            // 發送選擇階段訊息和物件列表
             PhaseChangeMessage phaseMsg = new PhaseChangeMessage(GamePhase.SELECTING);
             ObjectListMessage objMsg = new ObjectListMessage(new ArrayList<>(currentRoom.availableObjects));
             
@@ -607,9 +607,9 @@ currentRoom.getInfo().totalRounds
         /**
          * 生成新物件
          */
-      private List<GameObjectInfo> generateNewObjects() {    java MapEditor    java MapEditor
-    List<GameObjectInfo> objects = new ArrayList<>();
-    Random rand = new Random();
+        private List<GameObjectInfo> generateNewObjects() {
+            List<GameObjectInfo> objects = new ArrayList<>();
+            Random rand = new Random();
         // 原始數量 8-10，現在加倍 => 16-20
         int originalCount = 8 + rand.nextInt(3);
         int targetCount = Math.min(20, originalCount * 2); // 上限 20
