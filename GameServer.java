@@ -16,6 +16,11 @@ public class GameServer {
         "#FF00FF", "#00FFFF", "#FFA500"
     };
     private static int colorIndex = 0;
+    
+    // 獲取客戶端處理器
+    public static ClientHandler getClientHandler(String playerId) {
+        return clients.get(playerId);
+    }
 
     public static void main(String[] args) {
         System.out.println("=================================");
@@ -53,6 +58,7 @@ public class GameServer {
         private Room currentRoom = null;
         private volatile boolean roundMonitorRunning = false;
 
+        private GamePhase currentPhase = GamePhase.SELECTING;
         public ClientHandler(Socket socket, String playerId, String color) {
             this.socket = socket;
             this.playerId = playerId;
@@ -209,6 +215,9 @@ else if (obj instanceof JoinRandomRoomRequest) {
             System.out.println("[ROOM] Game started in room " + currentRoom.getInfo().roomCode + 
                              " (Round 1/5)");
             
+            // 發送地圖配置（只在遊戲開始時發送一次）
+            currentRoom.sendMapConfig();
+            
             // 開始第一輪
             startNewRound();
         }
@@ -216,11 +225,14 @@ else if (obj instanceof JoinRandomRoomRequest) {
         /**
          * 開始新一輪遊戲
          */
-        private void startNewRound() {
-            if (currentRoom == null) return;
-            
-            // 生成新物件
-            List<GameObjectInfo> availableObjects = generateNewObjects();
+                private void startNewRound() {
+                    if (currentRoom == null) return;
+                    // 生成新物件並保存到房間共享狀態
+                    List<GameObjectInfo> newList = generateNewObjects();
+                    synchronized (currentRoom) {
+                        currentRoom.availableObjects.clear();
+                        currentRoom.availableObjects.addAll(newList);
+                    }
             
             // 初始化回合狀態
             currentRoom.playerSelections.clear();
@@ -232,7 +244,7 @@ else if (obj instanceof JoinRandomRoomRequest) {
             
             // 發送選擇階段訊息
             PhaseChangeMessage phaseMsg = new PhaseChangeMessage(GamePhase.SELECTING);
-            ObjectListMessage objMsg = new ObjectListMessage(availableObjects);
+            ObjectListMessage objMsg = new ObjectListMessage(new ArrayList<>(currentRoom.availableObjects));
             
             for (String pid : currentRoom.getPlayerIds()) {
                 ClientHandler handler = clients.get(pid);
@@ -307,7 +319,7 @@ else if (obj instanceof JoinRandomRoomRequest) {
                                     ClientHandler handler = clients.get(pid);
                                     if (handler != null) {
                                         handler.sendObject(msg);
-                                        // 發送所有平台放置
+                                        // 發送所有玩家平台放置
                                         for (Map.Entry<String, PlatformPlacement> entry : currentRoom.playerPlacements.entrySet()) {
                                             handler.sendObject(new PlacementMessage(entry.getKey(), entry.getValue(), true));
                                         }
@@ -480,8 +492,24 @@ currentRoom.getInfo().totalRounds
          */
         private void handleSelection(SelectionMessage msg) {
             if (currentRoom == null) return;
-            currentRoom.playerSelections.put(playerId, msg.objectId);
-            System.out.println("[SELECT] " + playerId + " chose platform " + msg.objectId);
+            if (currentPhase != GamePhase.SELECTING) return;  // 階段檢查
+            
+            // 檢查物件是否已被選擇
+            GameObjectInfo obj = currentRoom.availableObjects.stream()
+                .filter(o -> o.id == msg.objectId)
+                .findFirst()
+                .orElse(null);
+                
+            if (obj != null && !obj.selected) {
+                obj.selected = true;
+                currentRoom.playerSelections.put(playerId, msg.objectId);
+                
+                // 廣播更新的物件列表給所有玩家
+                ObjectListMessage objMsg = new ObjectListMessage(new ArrayList<>(currentRoom.availableObjects));
+                broadcastToRoom(objMsg, null);
+                
+                System.out.println("[SELECT] " + playerId + " chose platform " + msg.objectId);
+            }
         }
         
         /**
@@ -579,19 +607,57 @@ currentRoom.getInfo().totalRounds
         /**
          * 生成新物件
          */
-        private List<GameObjectInfo> generateNewObjects() {
-            List<GameObjectInfo> objects = new ArrayList<>();
-            Random rand = new Random();
-            
-            for (int i = 0; i < 5; i++) {
-                int width = 80 + rand.nextInt(150);
-                int height = 15 + rand.nextInt(20);
-                String color = String.format("#%06X", rand.nextInt(0xFFFFFF) | 0x800000);
-                objects.add(new GameObjectInfo(i, width, height, color));
+      private List<GameObjectInfo> generateNewObjects() {    java MapEditor    java MapEditor
+    List<GameObjectInfo> objects = new ArrayList<>();
+    Random rand = new Random();
+        // 原始數量 8-10，現在加倍 => 16-20
+        int originalCount = 8 + rand.nextInt(3);
+        int targetCount = Math.min(20, originalCount * 2); // 上限 20
+
+    // 為避免"重疊"（此處解讀為重複屬性）採用唯一性鍵值 (type+width+height) 防止相同規格重複
+    Set<String> uniqueness = new HashSet<>();
+    int idCounter = 0;
+    int attempts = 0;
+    while (objects.size() < targetCount && attempts < 400) {
+        attempts++;
+        ObjectType type = ObjectType.values()[rand.nextInt(ObjectType.values().length)];
+        int width, height; String color; double moveSpeed = 0, moveRange = 0, fireRate = 0, rotateSpeed = 0;
+        switch(type) {
+            case DEATH -> {
+                width = 100 + rand.nextInt(80);
+                height = 20 + rand.nextInt(10);
+                color = "#FF0000";
             }
-            
-            return objects;
+            case ERASER -> {
+                width = 150; height = 150; color = "#FFAAFF";
+            }
+            case MOVING_H -> {
+                width = 120 + rand.nextInt(50); height = 20 + rand.nextInt(10); color = "#00AAFF";
+                moveSpeed = 2 + rand.nextDouble() * 2; moveRange = 200 + rand.nextInt(200);
+            }
+            case MOVING_V -> {
+                width = 120 + rand.nextInt(50); height = 20 + rand.nextInt(10); color = "#AA00FF";
+                moveSpeed = 2 + rand.nextDouble() * 2; moveRange = 150 + rand.nextInt(150);
+            }
+            case BOUNCE -> {
+                width = 100 + rand.nextInt(60); height = 25 + rand.nextInt(10); color = "#00FF00";
+            }
+            case TURRET -> {
+                width = 80; height = 80; color = "#FF6600"; fireRate = 2 + rand.nextDouble() * 2;
+            }
+            default -> { // NORMAL
+                width = 80 + rand.nextInt(150); height = 15 + rand.nextInt(20);
+                color = String.format("#%06X", rand.nextInt(0xFFFFFF) | 0x800000);
+            }
         }
+        String key = type + ":" + width + "x" + height;
+        if (uniqueness.contains(key)) continue; // 避免重複規格
+        uniqueness.add(key);
+        GameObjectInfo obj = new GameObjectInfo(idCounter++, width, height, color, type, moveSpeed, moveRange, fireRate);
+        objects.add(obj);
+    }
+    return objects;
+}
 
         boolean sendObject(Object obj) {
             try {
@@ -654,6 +720,7 @@ class Room {
     final List<GameServer.FinishRecord> finishRecords = Collections.synchronizedList(new ArrayList<>());
     final Set<String> failedPlayers = ConcurrentHashMap.newKeySet();
     final Set<String> completedPlayers = ConcurrentHashMap.newKeySet();
+    final List<GameObjectInfo> availableObjects = Collections.synchronizedList(new ArrayList<>());
     
     public Room(String roomCode, String hostId, int maxPlayers, RoomType roomType) {
     this.info = new RoomInfo(roomCode, hostId, maxPlayers, roomType);
@@ -713,6 +780,39 @@ class Room {
             for (String pid : info.playerIds) {
                 info.readyStatus.put(pid, false);
             }
+        }
+    }
+    
+    // 加載並發送地圖配置
+    public void sendMapConfig() {
+        try {
+            MapConfig mapConfig = new MapConfig();
+            mapConfig.load();
+            List<MapPlatform> platforms = mapConfig.getPlatforms();
+            
+            if (!platforms.isEmpty()) {
+                // 轉換為 PlatformPlacement 列表
+                List<PlatformPlacement> mapPlacements = new ArrayList<>();
+                for (MapPlatform mp : platforms) {
+                    mapPlacements.add(new PlatformPlacement(-1, mp.x, mp.y, 
+                                                           mp.width, mp.height, 
+                                                           mp.color, mp.rotation));
+                }
+                
+                // 發送給房間內所有玩家
+                RandomPlatformsMessage mapMsg = new RandomPlatformsMessage(mapPlacements);
+                for (String pid : info.playerIds) {
+                    GameServer.ClientHandler handler = GameServer.getClientHandler(pid);
+                    if (handler != null) {
+                        handler.sendObject(mapMsg);
+                    }
+                }
+                System.out.println("[ROOM] Sent map config with " + platforms.size() + " platforms");
+            } else {
+                System.out.println("[ROOM] No map config found, using empty map");
+            }
+        } catch (Exception e) {
+            System.out.println("[ROOM] Failed to load map config: " + e.getMessage());
         }
     }
     

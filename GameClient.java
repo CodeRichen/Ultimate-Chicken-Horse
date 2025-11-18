@@ -38,6 +38,7 @@ public class GameClient extends GameApplication {
     
     private GamePhase currentPhase = GamePhase.SELECTING;
     private List<GameObjectInfo> availableObjects = new ArrayList<>();
+    private Map<Integer, GameObjectInfo> availableObjMap = new HashMap<>();
     private Integer selectedObjectId = null;
     private PlatformPlacement myPlacement = null;
     private Map<String, PlatformPlacement> otherPlacements = new HashMap<>();
@@ -60,6 +61,7 @@ public class GameClient extends GameApplication {
     
     private Entity startPlatform;
     private Entity endPlatform;
+    private Entity groundPlatform; // 底部大型平台防止玩家掉落
     
     private long gameStartTime = 0;
     private static final long GAME_DURATION = 120000;
@@ -69,17 +71,23 @@ public class GameClient extends GameApplication {
     
     private boolean hasFinished = false;
     private boolean hasFailed = false;
+    private boolean mapPlatformsLoaded = false;  // 標記地圖平台是否已加載
     private enum UIState {
         MENU,      // 主選單
         IN_ROOM,   // 在房間中
         PLAYING    // 遊戲中
     }
 
+
+
+
     private UIState uiState = UIState.MENU;
     private RoomInfo currentRoomInfo = null;
     private List<Entity> menuEntities = new ArrayList<>();
     private List<Entity> roomUIEntities = new ArrayList<>();
     private javafx.scene.control.TextField roomCodeInput;
+    private double cameraOffsetX = 0;
+    private static final int FINISH_X = 3000;  
 
     /**
      * 創建主選單UI
@@ -620,7 +628,9 @@ private void createGameZones() {
 
     private void createFixedPlatforms() {
     startPlatform = createPlatform(50, SCREEN_HEIGHT - 150, 200, 30, Color.GREEN);
-    endPlatform = createPlatform(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 150, 200, 30, Color.GOLD);
+    endPlatform = createPlatform(FINISH_X - 200, SCREEN_HEIGHT - 150, 200, 30, Color.GOLD); 
+    // 大型底部安全平台
+    groundPlatform = createPlatform(0, SCREEN_HEIGHT - 60, FINISH_X, 60, Color.rgb(70,70,70));
     
     Text startLabel = new Text("START");
     startLabel.setFont(Font.font(20));
@@ -631,7 +641,7 @@ private void createGameZones() {
             .buildAndAttach();
     platformEntities.add(startLabelEntity);  // 加入列表以便管理
     
-    Text endLabel = new Text("FINISH");
+    Text endLabel = new Text("END");
     endLabel.setFont(Font.font(20));
     endLabel.setFill(Color.WHITE);
     Entity endLabelEntity = FXGL.entityBuilder()
@@ -643,6 +653,7 @@ private void createGameZones() {
     // 初始時隱藏
     startPlatform.setVisible(false);
     endPlatform.setVisible(false);
+    groundPlatform.setVisible(false);
     startLabelEntity.setVisible(false);
     endLabelEntity.setVisible(false);
 }
@@ -706,7 +717,7 @@ private void createGameZones() {
                     .buildAndAttach();
             objectButtons.add(objPreview);
             
-            Text numLabel = new Text("Platform " + (i + 1));
+                Text numLabel = new Text("Platform " + (i + 1) + " (" + obj.type + ")");
             numLabel.setFont(Font.font(20));
             numLabel.setFill(Color.WHITE);
             Entity numEntity = FXGL.entityBuilder()
@@ -723,8 +734,31 @@ private void createGameZones() {
                     .view(sizeLabel)
                     .buildAndAttach();
             objectButtons.add(sizeEntity);
+                // 用途描述
+                String desc = getObjectDescription(obj.type);
+                Text descText = new Text(desc);
+                descText.setFont(Font.font(16));
+                descText.setFill(Color.LIGHTGRAY);
+                Entity descEntity = FXGL.entityBuilder()
+                    .at(SCREEN_WIDTH / 2 + 10, yPos + 25)
+                    .view(descText)
+                    .buildAndAttach();
+                objectButtons.add(descEntity);
         }
     }
+
+            private String getObjectDescription(ObjectType type) {
+            return switch(type) {
+                case NORMAL -> "普通平台：可站立通行";
+                case DEATH -> "死亡平台：碰觸立即失敗";
+                case ERASER -> "橡皮擦：清除範圍內的平台";
+                case MOVING_H -> "水平移動：左右往返，需要掌握節奏";
+                case MOVING_V -> "垂直移動：上下往返，注意時機";
+                case BOUNCE -> "彈跳：踩上彈射提高高度";
+                case TURRET -> "砲塔：定期射出子彈";
+                case ROTATING -> "旋轉：不斷旋轉增加難度";
+            };
+            }
     
     private void clearObjectSelection() {
         System.out.println("[CLIENT] Clearing object selection UI");
@@ -734,10 +768,14 @@ private void createGameZones() {
         objectButtons.clear();
     }
     
+    private Entity finishButtonText = null;
     private void showFinishButton() {
         System.out.println("[CLIENT] Showing finish button");
         if (finishButton != null) {
             finishButton.removeFromWorld();
+        }
+        if (finishButtonText != null) {
+            finishButtonText.removeFromWorld();
         }
         
         Rectangle btnBg = new Rectangle(200, 60, Color.rgb(50, 200, 50));
@@ -753,7 +791,7 @@ private void createGameZones() {
                 .view(btnBg)
                 .buildAndAttach();
         
-        FXGL.entityBuilder()
+        finishButtonText = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH - 200, SCREEN_HEIGHT - 62)
                 .view(btnText)
                 .buildAndAttach();
@@ -765,6 +803,10 @@ private void createGameZones() {
             finishButton.removeFromWorld();
             finishButton = null;
         }
+        if (finishButtonText != null) {
+            finishButtonText.removeFromWorld();
+            finishButtonText = null;
+        }
     }
     
 private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integer> totalScores, List<String> finishOrder) {
@@ -772,6 +814,9 @@ private void showLeaderboard(Map<String, Integer> roundScores, Map<String, Integ
                       (currentRoomInfo != null ? currentRoomInfo.currentRound : "null"));
     
     hideLeaderboard();
+    // 顯示排行榜時相機回到最左側
+    cameraOffsetX = 0;
+    FXGL.getGameScene().getViewport().setX(cameraOffsetX);
     
     // 隱藏遊戲UI
     phaseText.setVisible(false);
@@ -913,10 +958,20 @@ private void hideLeaderboard() {
                             handlePhaseChange(phaseMsg.phase);
                         });
                     }
+                    else if (obj instanceof RandomPlatformsMessage mapMsg) {
+                        System.out.println("[CLIENT] Received map platforms: " + mapMsg.randomPlatforms.size());
+                        javafx.application.Platform.runLater(() -> {
+                            handleMapPlatforms(mapMsg.randomPlatforms);
+                        });
+                    }
                     else if (obj instanceof ObjectListMessage objListMsg) {
                         System.out.println("[CLIENT] Received object list: " + objListMsg.objects.size() + " objects");
                         javafx.application.Platform.runLater(() -> {
                             availableObjects = objListMsg.objects;
+                            availableObjMap.clear();
+                            for (GameObjectInfo gi : availableObjects) {
+                                availableObjMap.put(gi.id, gi);
+                            }
                             if (currentPhase == GamePhase.SELECTING) {
                                 displayObjectSelection();
                             }
@@ -1059,7 +1114,7 @@ private void hideLeaderboard() {
             while (running) {
                 try {
                     // 只在遊戲中且玩家可見時發送位置
-                    if (connected && currentPhase == GamePhase.PLAYING && 
+                    if (connected && uiState == UIState.PLAYING && 
                         player != null && player.isVisible() ) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
@@ -1090,7 +1145,7 @@ private void hideLeaderboard() {
         new Thread(() -> {
             while (running) {
                 try {
-                    if (connected && currentPhase == GamePhase.PLACING && 
+                    if (connected && uiState == UIState.PLAYING && 
                         previewPlatform != null && myPlacement == null && selectedObj != null) {
                         
                         synchronized (out) {
@@ -1136,9 +1191,13 @@ private void handlePhaseChange(GamePhase newPhase) {
             phaseText.setText("Phase: SELECT YOUR PLATFORM");
             phaseText.setVisible(true);
             player.setVisible(false);
+            // 進入選擇階段重置鏡頭
+            cameraOffsetX = 0;
+            FXGL.getGameScene().getViewport().setX(0);
             // 隱藏起點和終點平台
             startPlatform.setVisible(false);
             endPlatform.setVisible(false);
+            if (groundPlatform != null) groundPlatform.setVisible(false);
             if (platformEntities.size() > 2) {
                 platformEntities.get(2).setVisible(false); // START label
                 platformEntities.get(3).setVisible(false); // FINISH label
@@ -1183,6 +1242,9 @@ private void handlePhaseChange(GamePhase newPhase) {
             clearObjectSelection();
             if (previewPlatform != null && myPlacement == null) {
                 showFinishButton();
+                System.out.println("[CLIENT] Can now drag and rotate platform");
+            } else {
+                System.out.println("[CLIENT ERROR] No preview platform in PLACING phase!");
             }
             break;
             
@@ -1197,6 +1259,7 @@ private void handlePhaseChange(GamePhase newPhase) {
             startPlatform.setVisible(true);
             endPlatform.setVisible(true);
             middlePlatform.setVisible(true);
+            if (groundPlatform != null) groundPlatform.setVisible(true);
             if (platformEntities.size() > 2) {
                 platformEntities.get(2).setVisible(true); // START label
                 platformEntities.get(3).setVisible(true); // FINISH label
@@ -1218,22 +1281,19 @@ private void handlePhaseChange(GamePhase newPhase) {
             }
             otherPreviewEntities.clear();
             
-            // 創建所有玩家本回合放置的平台
-            System.out.println("[CLIENT] Creating platforms: my=" + (myPlacement != null) + 
+            // 創建所有玩家本回合放置的物件（依照物件類型建立行為）
+            System.out.println("[CLIENT] Creating placed objects: my=" + (myPlacement != null) + 
                              " others=" + otherPlacements.size());
-            
             for (Map.Entry<String, PlatformPlacement> entry : otherPlacements.entrySet()) {
                 PlatformPlacement p = entry.getValue();
-                System.out.println("[CLIENT] Creating platform for " + entry.getKey() + 
-                                 " at (" + p.x + "," + p.y + ") rotation=" + p.rotation);
-                createPlatformWithRotation(p.x, p.y, p.width, p.height, Color.web(p.color), p.rotation);
+                System.out.println("[CLIENT] Creating object for " + entry.getKey() + 
+                                 " at (" + p.x + "," + p.y + ") rotation=" + p.rotation + " id=" + p.id);
+                createPlacedObject(p);
             }
-            
             if (myPlacement != null) {
-                System.out.println("[CLIENT] Creating my platform at (" + myPlacement.x + "," + 
-                                 myPlacement.y + ") rotation=" + myPlacement.rotation);
-                createPlatformWithRotation(myPlacement.x, myPlacement.y, myPlacement.width, 
-                             myPlacement.height, Color.web(myPlacement.color), myPlacement.rotation);
+                System.out.println("[CLIENT] Creating my object at (" + myPlacement.x + "," +
+                                 myPlacement.y + ") rotation=" + myPlacement.rotation + " id=" + myPlacement.id);
+                createPlacedObject(myPlacement);
             }
             
             otherPlacements.clear();
@@ -1262,6 +1322,21 @@ private void handlePhaseChange(GamePhase newPhase) {
             otherPreviewPlacements.put(msg.playerId, msg.placement);
             updateOtherPreview(msg.playerId, msg.placement);
         }
+    }
+    
+    private void handleMapPlatforms(List<PlatformPlacement> mapPlatforms) {
+        // 只在遊戲開始時加載地圖平台一次
+        if (mapPlatformsLoaded) {
+            System.out.println("[CLIENT] Map platforms already loaded, skipping");
+            return;
+        }
+        
+        System.out.println("[CLIENT] Loading map with " + mapPlatforms.size() + " platforms");
+        for (PlatformPlacement placement : mapPlatforms) {
+            createPlacedObject(placement);
+        }
+        mapPlatformsLoaded = true;
+        System.out.println("[CLIENT] Map platforms loaded successfully");
     }
     
     private void updateOtherPreview(String playerId, PlatformPlacement placement) {
@@ -1338,10 +1413,108 @@ private void handlePhaseChange(GamePhase newPhase) {
                 .view(rect)
                 .with(new PlatformComponent(width, height))
                 .buildAndAttach();
-        
         platform.setRotation(rotation);
         platformEntities.add(platform);
         return platform;
+    }
+
+    private Entity createPlacedObject(PlatformPlacement p) {
+        GameObjectInfo info = availableObjMap.getOrDefault(p.id, null);
+        Color color = Color.web(p.color);
+        Rectangle rect = new Rectangle(p.width, p.height, color);
+        Entity e;
+        if (info == null) {
+            // Fallback to simple platform
+            return createPlatformWithRotation(p.x, p.y, p.width, p.height, color, p.rotation);
+        }
+        switch (info.type) {
+            case MOVING_H: {
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new MovingPlatformComponent(true, Math.max(0.5, info.moveSpeed), Math.max(50, info.moveRange)))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            }
+            case MOVING_V: {
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new MovingPlatformComponent(false, Math.max(0.5, info.moveSpeed), Math.max(50, info.moveRange)))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            }
+            case BOUNCE: {
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new BouncePlatformComponent())
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            }
+            case TURRET: {
+                // Turret 可供玩家站立：同時具有 PlatformComponent 與 TurretComponent
+                e = FXGL.entityBuilder()
+                    .at(p.x, p.y)
+                    .view(rect)
+                    .with(new PlatformComponent(p.width, p.height))
+                    .with(new TurretComponent(Math.max(0.8, info.fireRate)))
+                    .buildAndAttach();
+                e.setRotation(p.rotation);
+                platformEntities.add(e);
+                return e;
+            }
+            case DEATH: {
+                // 死亡區也要可以踩，同時具有死亡檢測
+                e = FXGL.entityBuilder()
+                        .at(p.x, p.y)
+                        .view(rect)
+                        .with(new PlatformComponent(p.width, p.height))
+                        .with(new DeathZoneComponent(p.width, p.height))
+                        .buildAndAttach();
+                e.setRotation(p.rotation);
+                deathZones.add(e);
+                platformEntities.add(e);  // 加入平台列表，可以踩
+                return e;
+            }
+            case ERASER: {
+                // ERASER 不顯示方塊，只清除範圍內的平台
+                double eraserCenterX = p.x + p.width / 2;
+                double eraserCenterY = p.y + p.height / 2;
+                double eraserRadius = Math.max(p.width, p.height) / 2;
+                
+                // 清除範圍內的平台
+                platformEntities.removeIf(platform -> {
+                    double platformCenterX = platform.getX() + platform.getWidth() / 2;
+                    double platformCenterY = platform.getY() + platform.getHeight() / 2;
+                    double distance = Math.sqrt(Math.pow(eraserCenterX - platformCenterX, 2) + 
+                                               Math.pow(eraserCenterY - platformCenterY, 2));
+                    
+                    if (distance <= eraserRadius) {
+                        platform.removeFromWorld();
+                        System.out.println("[CLIENT] ERASER removed platform at (" + platform.getX() + "," + platform.getY() + ")");
+                        return true;
+                    }
+                    return false;
+                });
+                
+                // ERASER 不返回 entity，也不加入 platformEntities
+                System.out.println("[CLIENT] ERASER cleared platforms in range " + eraserRadius);
+                return null;
+            }
+            case NORMAL:
+            default:
+                return createPlatformWithRotation(p.x, p.y, p.width, p.height, color, p.rotation);
+        }
     }
     
     private String toHex(Color color) {
@@ -1358,6 +1531,9 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveLeft();
+                } else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
+                    cameraOffsetX = Math.max(0, cameraOffsetX - 120);
+                    FXGL.getGameScene().getViewport().setX(cameraOffsetX);
                 }
             }
         }, KeyCode.A);
@@ -1400,6 +1576,10 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveRight();
+                } else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
+                    double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
+                    cameraOffsetX = Math.min(maxOffset, cameraOffsetX + 120);
+                    FXGL.getGameScene().getViewport().setX(cameraOffsetX);
                 }
             }
         }, KeyCode.D);
@@ -1474,8 +1654,9 @@ private void handlePhaseChange(GamePhase newPhase) {
         FXGL.getInput().addAction(new UserAction("Rotate Left") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLACING && previewPlatform != null && myPlacement == null) {
+                if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && previewPlatform != null && myPlacement == null) {
                     currentRotation -= 90;
+                    previewPlatform.getTransformComponent().setRotationOrigin(new Point2D(previewPlatform.getWidth() / 2.0, previewPlatform.getHeight() / 2.0));
                     previewPlatform.setRotation(currentRotation);
                     System.out.println("[CLIENT] Rotated left to " + currentRotation + "°");
                 }
@@ -1485,8 +1666,9 @@ private void handlePhaseChange(GamePhase newPhase) {
         FXGL.getInput().addAction(new UserAction("Rotate Right") {
             @Override
             protected void onActionBegin() {
-                if (currentPhase == GamePhase.PLACING && previewPlatform != null && myPlacement == null) {
+                if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && previewPlatform != null && myPlacement == null) {
                     currentRotation += 90;
+                    previewPlatform.getTransformComponent().setRotationOrigin(new Point2D(previewPlatform.getWidth() / 2.0, previewPlatform.getHeight() / 2.0));
                     previewPlatform.setRotation(currentRotation);
                     System.out.println("[CLIENT] Rotated right to " + currentRotation + "°");
                 }
@@ -1511,7 +1693,7 @@ private void handlePhaseChange(GamePhase newPhase) {
                 if (currentPhase == GamePhase.SELECTING && selectedObjectId == null) {
                     handleObjectSelection(mousePos);
                 }
-                else if (currentPhase == GamePhase.PLACING && myPlacement == null) {
+                else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
                     // 檢查是否點擊 Finish 按鈕
                     if (finishButton != null && previewPlatform != null) {
                         double btnX = SCREEN_WIDTH - 250;
@@ -1569,7 +1751,11 @@ private void handlePhaseChange(GamePhase newPhase) {
             
             if (mousePos.getX() >= btnLeft && mousePos.getX() <= btnRight &&
                 mousePos.getY() >= btnTop && mousePos.getY() <= btnBottom) {
-                
+                 // 檢查物件是否已被選
+        if (obj.selected) {
+            System.out.println("[CLIENT ERROR] Object " + obj.id + " already selected!");
+            continue;  // 跳過已被選的物件
+        }
                 selectedObjectId = obj.id;
                 selectedObj = obj;
                 System.out.println("[CLIENT] Selected object " + obj.id);
@@ -1588,11 +1774,11 @@ private void handlePhaseChange(GamePhase newPhase) {
                 
                 clearObjectSelection();
                 createPreviewPlatform();
-                
-                // currentPhase = GamePhase.PLACING;
-                // phaseText.setText("Phase: DRAG & ROTATE (Q/E 90°), THEN FINISH");
-                // showFinishButton();
-                phaseText.setText("Waiting for other players to select...");
+
+                // 立即允許本地玩家進入放置流程（即使其他人尚未完成選擇）
+                currentPhase = GamePhase.PLACING;
+                phaseText.setText("Phase: DRAG & ROTATE (Q/E 90°), THEN FINISH");
+                showFinishButton();
                 break;
             }
         }
@@ -1647,6 +1833,9 @@ private void handlePhaseChange(GamePhase newPhase) {
             phaseText.setText("Waiting for other players...");
             hideFinishButton();
             isDragging = false;
+            // 放置完成後鏡頭歸零
+            cameraOffsetX = 0;
+            FXGL.getGameScene().getViewport().setX(0);
         } else {
             System.err.println("[CLIENT ERROR] Cannot confirm: selectedObj=" + selectedObj + 
                              " previewPlatform=" + previewPlatform + " myPlacement=" + myPlacement);
@@ -1655,15 +1844,22 @@ private void handlePhaseChange(GamePhase newPhase) {
     
     @Override
     protected void onUpdate(double tpf) {
-        // 處理拖曳
-        if (currentPhase == GamePhase.PLACING && isDragging && previewPlatform != null && myPlacement == null) {
+        // 處理拖曳（允許在本地 PLACING 或 SELECTING 狀態拖曳）
+        if (isDragging && previewPlatform != null && myPlacement == null) {
             Point2D mousePos = FXGL.getInput().getMousePositionWorld();
             previewPlatform.setPosition(
                 mousePos.getX() - dragOffset.getX(),
                 mousePos.getY() - dragOffset.getY()
             );
         }
-        
+        if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
+            double targetCameraX = player.getX() - SCREEN_WIDTH / 3.0;
+            double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
+            cameraOffsetX = Math.max(0, Math.min(maxOffset, targetCameraX));
+            FXGL.getGameScene().getViewport().setX(cameraOffsetX);
+        }
+
+
         // 更新計時器
         if (currentPhase == GamePhase.PLAYING && gameStartTime > 0) {
             long elapsed = System.currentTimeMillis() - gameStartTime;
@@ -1677,7 +1873,32 @@ private void handlePhaseChange(GamePhase newPhase) {
         } else {
             timerText.setText("");
         }
-        
+        // ✅ 子彈碰撞檢測（修正版）
+    if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+        // 檢查子彈碰撞
+        List<Entity> allEntities = FXGL.getGameWorld().getEntities();
+        for (Entity e : allEntities) {
+            if (e.hasComponent(BulletComponent.class)) {
+                BulletComponent bullet = e.getComponent(BulletComponent.class);
+                if (bullet.checkHit(player.getX(), player.getY(), 25)) {
+                    // 被子彈擊中 - 發送失敗訊息
+                    try {
+                        synchronized (out) {
+                            out.writeObject(new FailMessage(myPlayerId));
+                            out.flush();
+                            out.reset();
+                        }
+                        hasFailed = true;
+                        player.setVisible(false);
+                        System.out.println("[CLIENT] Hit by bullet!");
+                    } catch (Exception ex) {
+                        System.err.println("[CLIENT ERROR] Failed to send fail message: " + ex.getMessage());
+                    }
+                    break;
+                }
+            }
+        }
+    }
         // 檢查是否到達終點或死亡
     if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
         double playerX = player.getX();
@@ -1780,6 +2001,7 @@ class SmoothPlayerComponent extends Component {
         this.targetScaleY = scaleY;
     }
 
+
     @Override
     public void onUpdate(double tpf) {
         if (targetPosition.equals(Point2D.ZERO)) {
@@ -1876,94 +2098,42 @@ class PlatformComponent extends Component {
      * 使用圓形與旋轉矩形的精確碰撞檢測
      */
     private CollisionInfo checkRotatedCollision(double playerX, double playerY, double radius, double velocityY) {
-    double centerX = entity.getX() + width / 2;
-    double centerY = entity.getY() + height / 2;
-    double angle = Math.toRadians(-entity.getRotation());
-    
-    // 將玩家座標轉換到平台的局部座標系
-    double dx = playerX - centerX;
-    double dy = playerY - centerY;
+    // 新方法：使用局部座標 + 單純頂面判定，避免高速旋轉穿透
+    double angleDeg = entity.getRotation();
+    double centerX = entity.getX() + width / 2.0;
+    double centerY = entity.getY() + height / 2.0;
+    double angle = Math.toRadians(-angleDeg);
+
+    // 玩家底部點（更貼近踩踏感）
+    double playerBottomX = playerX;
+    double playerBottomY = playerY + radius * 0.6; // 若半徑 25，採底部偏上些減少誤判
+
+    double dx = playerBottomX - centerX;
+    double dy = playerBottomY - centerY;
     double localX = dx * Math.cos(angle) - dy * Math.sin(angle);
     double localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-    
-    double halfWidth = width / 2;
-    double halfHeight = height / 2;
-    
-    // 找到矩形上最接近圓心的點
-    double closestX = Math.max(-halfWidth, Math.min(halfWidth, localX));
-    double closestY = Math.max(-halfHeight, Math.min(halfHeight, localY));
-    
-    // 計算距離
-    double distX = localX - closestX;
-    double distY = localY - closestY;
-    double distSquared = distX * distX + distY * distY;
-    
-    if (distSquared > radius * radius) {
+
+    double halfW = width / 2.0;
+    double halfH = height / 2.0;
+
+    // 是否在矩形投影範圍內（含少量邊界緩衝）
+    double padding = 4.0;
+    boolean insideProj = localX >= -halfW - padding && localX <= halfW + padding &&
+                         localY >= -halfH - padding && localY <= halfH + padding;
+    if (!insideProj) {
         return new CollisionInfo(false, CollisionSide.NONE);
     }
-    
-    // 改進的碰撞面判定
-    CollisionSide side = CollisionSide.NONE;
-    
-    // 計算到各邊的距離
-    double distToTop = Math.abs(localY + halfHeight);
-    double distToBottom = Math.abs(localY - halfHeight);
-    double distToLeft = Math.abs(localX + halfWidth);
-    double distToRight = Math.abs(localX - halfWidth);
-    
-    double minDist = Math.min(Math.min(distToTop, distToBottom), 
-                             Math.min(distToLeft, distToRight));
-    
-    double threshold = 3.0;  // 閾值
-    
-    // 判斷碰撞面 - 使用全局速度方向
-    if (minDist == distToTop && distToTop < threshold) {
-        // 在頂邊附近
-        if (velocityY >= 0) {
-            side = CollisionSide.TOP;
-        }
-    } else if (minDist == distToBottom && distToBottom < threshold) {
-        // 在底邊附近
-        if (velocityY <= 0) {
-            side = CollisionSide.BOTTOM;
-        }
-    } else if (minDist == distToLeft && distToLeft < threshold) {
-        side = CollisionSide.LEFT;
-    } else if (minDist == distToRight && distToRight < threshold) {
-        side = CollisionSide.RIGHT;
+
+    // 僅處理頂面著地：玩家局部座標需要在頂面上方且正在下落
+    boolean falling = velocityY >= 0;
+    boolean aboveTopSurface = localY <= -halfH + 6; // 距離頂面容忍值
+    if (falling && aboveTopSurface) {
+        return new CollisionInfo(true, CollisionSide.TOP);
     }
-    
-    return new CollisionInfo(true, side);
-}
-    
-    /**
-     * 獲取旋轉平台在世界座標系中的表面Y座標
-     * 用於精確放置玩家
-     */
-public double getRotatedSurfaceY(double playerX) {
-    if (Math.abs(entity.getRotation()) < 0.1) {
-        return entity.getY();
+
+    // 其餘僅當作側面/底面簡化：不改變 Y，但阻擋 X（此處不細分，回傳一般碰撞）
+    return new CollisionInfo(true, CollisionSide.NONE);
     }
-    
-    double centerX = entity.getX() + width / 2;
-    double centerY = entity.getY() + height / 2;
-    double angle = Math.toRadians(-entity.getRotation());
-    
-    // 將玩家X轉換到局部座標
-    double dx = playerX - centerX;
-    double localX = dx * Math.cos(angle);
-    
-    // 限制在平台寬度內
-    double halfWidth = width / 2;
-    localX = Math.max(-halfWidth, Math.min(halfWidth, localX));
-    
-    // 頂面的局部Y座標（考慮玩家半徑的誤差修正）
-    double localY = -height / 2 - 2;  // 往上偏移一點，避免陷入
-    
-    // 轉換回世界座標
-    double worldY = centerY + (localX * Math.sin(angle) + localY * Math.cos(angle));
-    return worldY;
-}
 }
 
 /**
@@ -1981,7 +2151,7 @@ class PlayerControl extends Component {
     private double playerRadius = 25;
     
     private final double LEFT_BOUNDARY = playerRadius;
-    private final double RIGHT_BOUNDARY = 1920 - playerRadius;
+    private final double RIGHT_BOUNDARY = 5000 - playerRadius; // 使用整個關卡寬度 FINISH_X
     private final double TOP_BOUNDARY = playerRadius;
     private final double MAX_VELOCITY_Y = 25;
 
@@ -2029,7 +2199,7 @@ public void onUpdate(double tpf) {
     onGround = false;
     
     // 檢查Y方向碰撞
-    for (Entity platform : platforms) {
+  for (Entity platform : platforms) {
         if (!platform.hasComponent(PlatformComponent.class)) continue;
         
         PlatformComponent pc = platform.getComponent(PlatformComponent.class);
@@ -2038,28 +2208,28 @@ public void onUpdate(double tpf) {
         if (collision.collided) {
             switch (collision.side) {
                 case TOP:
-                    // 站在平台上
-                    if (Math.abs(platform.getRotation()) > 0.1) {
-                        double surfaceY = pc.getRotatedSurfaceY(entity.getX());
-                        entity.setY(surfaceY - playerRadius);
-                    } else {
-                        entity.setY(platform.getY() - playerRadius);
-                    }
+                    // 站立在平台上
+                    entity.setY(platform.getY() - playerRadius);
                     
                     if (velocityY > 0) velocityY = 0;
                     onGround = true;
+                    
+                    // 在這裡添加彈跳平台檢測
+                    if (platform.hasComponent(BouncePlatformComponent.class)) {
+                        BouncePlatformComponent bounce = platform.getComponent(BouncePlatformComponent.class);
+                        velocityY = -bounce.getBounceStrength();
+                        onGround = false;  // 彈跳時離地
+                    }
                     break;
                     
                 case BOTTOM:
-                    // 頭撞到平台
-                    entity.setY(oldY);  // 恢復位置
+                    entity.setY(oldY);
                     if (velocityY < 0) velocityY = 0;
                     break;
                     
                 case LEFT:
                 case RIGHT:
-                    // 側邊碰撞（垂直平台）
-                    if (!xCollision) {  // 如果X方向沒處理過
+                    if (!xCollision) {
                         entity.setX(oldX);
                         velocityX = 0;
                     }
@@ -2109,46 +2279,104 @@ public void onUpdate(double tpf) {
         return crouching;
     }
 }
-
-class CollisionInfo {
-    boolean collided;
-    CollisionSide side;
-
-    CollisionInfo(boolean collided, CollisionSide side) {
-        this.collided = collided;
-        this.side = side;
+// 移動平台組件
+class MovingPlatformComponent extends Component {
+    private double startX, startY;
+    private double moveSpeed, moveRange;
+    private boolean horizontal;
+    private double elapsed = 0;
+    
+    public MovingPlatformComponent(boolean horizontal, double speed, double range) {
+        this.horizontal = horizontal;
+        this.moveSpeed = speed;
+        this.moveRange = range;
+    }
+    
+    @Override
+    public void onAdded() {
+        startX = entity.getX();
+        startY = entity.getY();
+    }
+    
+    @Override
+    public void onUpdate(double tpf) {
+        elapsed += tpf;
+        double offset = Math.sin(elapsed * moveSpeed) * moveRange / 2;
+        
+        if (horizontal) {
+            entity.setX(startX + offset);
+        } else {
+            entity.setY(startY + offset);
+        }
     }
 }
 
-enum CollisionSide {
-    NONE, TOP, BOTTOM, LEFT, RIGHT
-}
-/**
- * 死亡區域組件
- */
-class DeathZoneComponent extends Component {
-    private double width;
-    private double height;
+// 彈跳平台組件
+class BouncePlatformComponent extends Component {
+    private static final double BOUNCE_STRENGTH = 30.0;
     
-    public DeathZoneComponent(double width, double height) {
-        this.width = width;
-        this.height = height;
+    public double getBounceStrength() {
+        return BOUNCE_STRENGTH;
+    }
+}
+
+// 砲塔組件
+class TurretComponent extends Component {
+    private double fireRate;
+    private double timeSinceLastShot = 0;
+    private List<Entity> bullets = new ArrayList<>();
+    
+    public TurretComponent(double fireRate) {
+        this.fireRate = fireRate;
     }
     
-    public boolean checkCollision(double playerX, double playerY, double radius) {
-        double zoneLeft = entity.getX();
-        double zoneRight = entity.getX() + width;
-        double zoneTop = entity.getY();
-        double zoneBottom = entity.getY() + height;
+    @Override
+    public void onUpdate(double tpf) {
+        timeSinceLastShot += tpf;
         
-        double playerLeft = playerX - radius;
-        double playerRight = playerX + radius;
-        double playerTop = playerY - radius;
-        double playerBottom = playerY + radius;
-        
-        return !(playerRight < zoneLeft || 
-                 playerLeft > zoneRight || 
-                 playerBottom < zoneTop || 
-                 playerTop > zoneBottom);
+        if (timeSinceLastShot >= fireRate) {
+            fireBullet();
+            timeSinceLastShot = 0;
+        }
+    }
+    
+    private void fireBullet() {
+        Circle bullet = new Circle(5, Color.RED);
+        int rot = ((int)Math.round(entity.getRotation()) % 360 + 360) % 360;
+        double dx = 1, dy = 0; // 0° 射向右
+        if (rot >= 45 && rot < 135) { dx = 0; dy = -1; }       // 90° 射向上
+        else if (rot >= 135 && rot < 225) { dx = -1; dy = 0; } // 180° 射向左
+        else if (rot >= 225 && rot < 315) { dx = 0; dy = 1; }  // 270° 射向下
+        Entity bulletEntity = FXGL.entityBuilder()
+            .at(entity.getX() + entity.getWidth()/2, entity.getY() + entity.getHeight()/2)
+            .view(bullet)
+            .with(new BulletComponent(dx, dy))
+            .buildAndAttach();
+        bullets.add(bulletEntity);
+    }
+}
+
+// 子彈組件
+class BulletComponent extends Component {
+    private double speed = 300;
+    private double dirX, dirY;
+    public BulletComponent(double dirX, double dirY) {
+        double len = Math.sqrt(dirX*dirX + dirY*dirY);
+        if (len == 0) { this.dirX = 1; this.dirY = 0; }
+        else { this.dirX = dirX/len; this.dirY = dirY/len; }
+    }
+    @Override
+    public void onUpdate(double tpf) {
+        entity.translateX(dirX * speed * tpf);
+        entity.translateY(dirY * speed * tpf);
+        int appH = FXGL.getAppHeight();
+        if (entity.getX() < -200 || entity.getX() > 10000 || entity.getY() < -200 || entity.getY() > appH + 200) {
+            entity.removeFromWorld();
+        }
+    }
+    public boolean checkHit(double playerX, double playerY, double radius) {
+        double dx = entity.getX() - playerX;
+        double dy = entity.getY() - playerY;
+        return Math.sqrt(dx*dx + dy*dy) < radius + 5;
     }
 }

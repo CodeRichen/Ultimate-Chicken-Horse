@@ -3,8 +3,6 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 所有遊戲訊息類別的定義
- * 注意：刪除 PlayerInfo.java 和 Messages.java，只保留這個檔案
  * 檔案名稱：SharedMessages.java
  */
 
@@ -13,6 +11,16 @@ enum GamePhase {
     SELECTING,  // 選擇平台
     PLACING,    // 放置平台
     PLAYING     // 競賽階段
+}
+enum ObjectType {
+    NORMAL,      // 普通平台
+    DEATH,       // 死亡平台（紅色）
+    ERASER,      // 橡皮擦
+    MOVING_H,    // 水平移動平台
+    MOVING_V,    // 垂直移動平台
+    BOUNCE,      // 彈跳平台
+    TURRET,      // 砲塔
+    ROTATING     // 旋轉平台
 }
 
 // 初始化訊息
@@ -37,6 +45,16 @@ class PhaseChangeMessage implements Serializable {
     }
 }
 
+// 隨機平台訊息
+class RandomPlatformsMessage implements Serializable {
+    private static final long serialVersionUID = 1L;
+    List<PlatformPlacement> randomPlatforms;
+    
+    public RandomPlatformsMessage(List<PlatformPlacement> randomPlatforms) {
+        this.randomPlatforms = randomPlatforms;
+    }
+}
+
 // 物件資訊
 class GameObjectInfo implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -44,15 +62,34 @@ class GameObjectInfo implements Serializable {
     int width;
     int height;
     String color;
+    ObjectType type;
+    boolean selected;  // 是否已被選擇
     
+    // 特殊屬性
+    double moveSpeed;   // 移動速度
+    double moveRange;   // 移動範圍
+    double fireRate;    // 砲塔發射速率
+    
+    // 舊版建構子（向下相容）
     public GameObjectInfo(int id, int width, int height, String color) {
+        this(id, width, height, color, ObjectType.NORMAL, 0, 0, 0);
+    }
+    
+    // 完整建構子
+    public GameObjectInfo(int id, int width, int height, String color, 
+                         ObjectType type, double moveSpeed, double moveRange, 
+                         double fireRate) {
         this.id = id;
         this.width = width;
         this.height = height;
         this.color = color;
+        this.type = type;
+        this.selected = false;
+        this.moveSpeed = moveSpeed;
+        this.moveRange = moveRange;
+        this.fireRate = fireRate;
     }
 }
-
 // 物件列表訊息
 class ObjectListMessage implements Serializable {
     private static final long serialVersionUID = 1L;
