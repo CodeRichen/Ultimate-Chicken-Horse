@@ -72,6 +72,8 @@ public class GameClient extends GameApplication {
     private boolean hasFinished = false;
     private boolean hasFailed = false;
     private boolean mapPlatformsLoaded = false;  // 標記地圖平台是否已加載
+    private double deathRecoveryTimer = 0;  // 死亡恢復計時器
+    private static final double DEATH_RECOVERY_TIME = 2.0;  // 2秒後恢復
     private enum UIState {
         MENU,      // 主選單
         IN_ROOM,   // 在房間中
@@ -87,7 +89,7 @@ public class GameClient extends GameApplication {
     private List<Entity> roomUIEntities = new ArrayList<>();
     private javafx.scene.control.TextField roomCodeInput;
     private double cameraOffsetX = 0;
-    private static final int FINISH_X = 3000;  
+    private static final int FINISH_X = 4000;  
 
     /**
      * 創建主選單UI
@@ -1044,6 +1046,7 @@ private void hideLeaderboard() {
                             player.setVisible(false);
                             hasFinished = false;
                             hasFailed = false;
+                            deathRecoveryTimer = 0;  // 重置死亡恢復計時器
                             hideLeaderboard();
                             clearObjectSelection();
                             hideFinishButton();
@@ -1059,6 +1062,10 @@ private void hideLeaderboard() {
                                 zone.removeFromWorld();
                             }
                             deathZones.clear();
+                            
+                            // 重置地圖加載狀態,以便下一回合重新加載地圖平台
+                            mapPlatformsLoaded = false;
+                            System.out.println("[CLIENT] Reset mapPlatformsLoaded to allow reloading in next round");
                             
                             // 清除所有子彈
                             FXGL.getGameWorld().getEntitiesByComponent(BulletComponent.class).forEach(Entity::removeFromWorld);
@@ -1429,12 +1436,13 @@ private void handlePhaseChange(GamePhase newPhase) {
         
         // 如果沒有 info，說明這是地圖平台，根據顏色決定類型
         if (info == null) {
-            System.out.println("[CLIENT] No info found, treating as map platform");
+            System.out.println("[CLIENT] No info found, treating as map platform with color: " + p.color);
             
             // 根據顏色判斷平台類型
-            if (p.color.equalsIgnoreCase("#FF0000")) {
+            if (p.color.equalsIgnoreCase("#FF0000") || p.color.equalsIgnoreCase("FF0000")) {
                 // 紅色 = 死亡區
                 System.out.println("[CLIENT] Creating DEATH platform from map");
+                rect.setFill(Color.RED);  // 確保紅色
                 e = FXGL.entityBuilder()
                         .at(p.x, p.y)
                         .view(rect)
@@ -1444,6 +1452,7 @@ private void handlePhaseChange(GamePhase newPhase) {
                 e.setRotation(p.rotation);
                 deathZones.add(e);
                 platformEntities.add(e);
+                System.out.println("[CLIENT] Added death zone to list, total: " + deathZones.size());
                 return e;
             } else if (p.color.equalsIgnoreCase("#00FF00")) {
                 // 綠色 = 彈跳
@@ -1560,35 +1569,43 @@ private void handlePhaseChange(GamePhase newPhase) {
                 return e;
             }
             case ERASER: {
-                // ERASER 不顯示方塊，只清除範圍內的平台
+                // ERASER 不顯示方塊，清除範圍內的所有平台和死亡區
                 double eraserLeft = p.x;
                 double eraserRight = p.x + p.width;
                 double eraserTop = p.y;
                 double eraserBottom = p.y + p.height;
                 
-                // 清除與橡皮擦範圍重疊的平台(只要碰到邊緣就清除)
-                platformEntities.removeIf(platform -> {
+                System.out.println("[CLIENT] ERASER at (" + p.x + "," + p.y + ") size " + p.width + "x" + p.height);
+                
+                List<Entity> toRemove = new ArrayList<>();
+                
+                // 檢查platformEntities中與橡皮擦重疊的平台(碰到邊緣就算)
+                for (Entity platform : platformEntities) {
                     double platformLeft = platform.getX();
                     double platformRight = platform.getX() + platform.getWidth();
                     double platformTop = platform.getY();
                     double platformBottom = platform.getY() + platform.getHeight();
                     
-                    // 檢查矩形重疊(AABB 碰撞檢測)
+                    // AABB 碰撞檢測 - 只要有任何重疊就清除
                     boolean overlaps = !(eraserRight < platformLeft || 
                                         eraserLeft > platformRight || 
                                         eraserBottom < platformTop || 
                                         eraserTop > platformBottom);
                     
                     if (overlaps) {
-                        platform.removeFromWorld();
-                        System.out.println("[CLIENT] ERASER removed platform at (" + platform.getX() + "," + platform.getY() + ")");
-                        return true;
+                        toRemove.add(platform);
+                        System.out.println("[CLIENT] ERASER marked platform at (" + platform.getX() + "," + platform.getY() + ") for removal");
                     }
-                    return false;
-                });
+                }
                 
-                // 橡皮擦自己也不顯示，直接返回null
-                System.out.println("[CLIENT] ERASER cleared overlapping platforms and disappeared");
+                // 移除所有標記的平台
+                for (Entity entity : toRemove) {
+                    entity.removeFromWorld();
+                    platformEntities.remove(entity);
+                    deathZones.remove(entity);  // 如果是死亡區也要移除
+                }
+                
+                System.out.println("[CLIENT] ERASER cleared " + toRemove.size() + " platforms/zones");
                 return null;
             }
             case NORMAL:
@@ -1611,6 +1628,10 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveLeft();
+                } else if (currentPhase == GamePhase.PLAYING && (hasFinished || hasFailed)) {
+                    // 已完成/死亡的玩家可以移動攝影機觀戰
+                    cameraOffsetX = Math.max(0, cameraOffsetX - 120);
+                    FXGL.getGameScene().getViewport().setX(cameraOffsetX);
                 } else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
                     cameraOffsetX = Math.max(0, cameraOffsetX - 120);
                     FXGL.getGameScene().getViewport().setX(cameraOffsetX);
@@ -1656,6 +1677,11 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveRight();
+                } else if (currentPhase == GamePhase.PLAYING && (hasFinished || hasFailed)) {
+                    // 已完成/死亡的玩家可以移動攝影機觀戰
+                    double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
+                    cameraOffsetX = Math.min(maxOffset, cameraOffsetX + 120);
+                    FXGL.getGameScene().getViewport().setX(cameraOffsetX);
                 } else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
                     double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
                     cameraOffsetX = Math.min(maxOffset, cameraOffsetX + 120);
@@ -1966,22 +1992,14 @@ private void handlePhaseChange(GamePhase newPhase) {
                 mousePos.getY() - dragOffset.getY()
             );
         }
-        if (currentPhase == GamePhase.PLAYING && player.isVisible()) {
-            // 如果玩家已完成，強制攝影機保持在最左邊
-            if (hasFinished) {
-                if (cameraOffsetX != 0) {
-                    cameraOffsetX = 0;
-                    FXGL.getGameScene().getViewport().setX(0);
-                    System.out.println("[CLIENT] Forced camera to X=0 (player finished)");
-                }
-            } else {
-                // 正常遊戲中，攝影機跟隨玩家
-                double targetCameraX = player.getX() - SCREEN_WIDTH / 3.0;
-                double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
-                cameraOffsetX = Math.max(0, Math.min(maxOffset, targetCameraX));
-                FXGL.getGameScene().getViewport().setX(cameraOffsetX);
-            }
+        if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+            // 只在玩家還在遊戲中時，攝影機跟隨玩家
+            double targetCameraX = player.getX() - SCREEN_WIDTH / 3.0;
+            double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
+            cameraOffsetX = Math.max(0, Math.min(maxOffset, targetCameraX));
+            FXGL.getGameScene().getViewport().setX(cameraOffsetX);
         }
+        // 如果玩家已完成或死亡，保持當前攝影機位置，允許手動移動(A/D鍵)
 
 
         // 更新計時器
@@ -2014,7 +2032,9 @@ private void handlePhaseChange(GamePhase newPhase) {
                         }
                         hasFailed = true;
                         player.setVisible(false);
-                        System.out.println("[CLIENT] Hit by bullet!");
+                        // 禁用玩家移動,但允許觀戰
+                        player.getComponent(PlayerControl.class).setEnabled(false);
+                        System.out.println("[CLIENT] Hit by bullet! Can spectate with A/D");
                     } catch (Exception ex) {
                         System.err.println("[CLIENT ERROR] Failed to send fail message: " + ex.getMessage());
                     }
@@ -2024,29 +2044,68 @@ private void handlePhaseChange(GamePhase newPhase) {
         }
     }
         // 檢查是否到達終點或死亡
-    if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+    if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished) {
         double playerX = player.getX();
         double playerY = player.getY();
         
-        // 檢查死亡區域
-        for (Entity zone : deathZones) {
-            if (zone.isVisible() && zone.hasComponent(DeathZoneComponent.class)) {
-                DeathZoneComponent dzc = zone.getComponent(DeathZoneComponent.class);
-                if (dzc.checkCollision(playerX, playerY, 25)) {
-                    try {
-                        synchronized (out) {
-                            out.writeObject(new FailMessage(myPlayerId));
-                            out.flush();
-                            out.reset();
-                        }
-                        hasFailed = true;
-                        // 玩家變扁
-                        player.setScaleY(0.2);
-                        System.out.println("[CLIENT] Touched death zone!");
-                    } catch (Exception e) {
-                        System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
+        // 處理死亡恢復計時器
+        if (deathRecoveryTimer > 0) {
+            deathRecoveryTimer -= tpf;
+            if (deathRecoveryTimer <= 0) {
+                // 恢復正常外觀,但不重置hasFailed(本回合已失敗)
+                player.setScaleY(1.0);
+                deathRecoveryTimer = 0;
+                System.out.println("[CLIENT] Player recovered from death (visual only, still failed this round)!");
+            }
+        }
+        
+        // 檢查是否站在死亡平台上(只在未處於死亡恢復狀態時檢查)
+        if (deathRecoveryTimer <= 0 && !hasFailed) {
+            PlayerControl pc = player.getComponent(PlayerControl.class);
+            boolean isStandingOnDeathPlatform = false;
+            
+            // 檢查玩家是否站在死亡平台上
+            for (Entity zone : deathZones) {
+                if (!zone.isVisible()) continue;
+                
+                // 計算玩家底部和平台頂部的距離
+                double playerBottom = playerY + 25;  // 玩家半徑
+                double platformTop = zone.getY();
+                double platformLeft = zone.getX();
+                double platformRight = zone.getX() + (zone.hasComponent(DeathZoneComponent.class) ? 
+                                                     zone.getComponent(DeathZoneComponent.class).width : 0);
+                
+                // 檢查玩家是否在平台上方範圍內,且底部接近平台頂部
+                boolean isOnTopOfPlatform = (playerX > platformLeft && playerX < platformRight &&
+                                            Math.abs(playerBottom - platformTop) < 5 &&
+                                            pc.velocityY >= 0);  // 向下移動或靜止
+                
+                if (isOnTopOfPlatform) {
+                    isStandingOnDeathPlatform = true;
+                    System.out.println("[CLIENT] Standing on death platform at (" + zone.getX() + "," + zone.getY() + ")!");
+                    break;
+                }
+            }
+            
+            if (isStandingOnDeathPlatform) {
+                try {
+                    System.out.println("[CLIENT] Sending FailMessage to server for player: " + myPlayerId);
+                    synchronized (out) {
+                        out.writeObject(new FailMessage(myPlayerId));
+                        out.flush();
+                        out.reset();
                     }
-                    return; // 立即返回，不再檢查其他
+                    hasFailed = true;
+                    // 玩家變扁,並開始恢復計時
+                    player.setScaleY(0.2);
+                    deathRecoveryTimer = 2.0;  // 2秒後恢復
+                    // 禁用玩家移動,但允許觀戰
+                    player.getComponent(PlayerControl.class).setEnabled(false);
+                    System.out.println("[CLIENT] Death triggered! Sent FailMessage, will recover visually in 2 seconds, can spectate with A/D");
+                    System.out.println("[CLIENT] Current phase: " + currentPhase + ", connected: " + connected);
+                } catch (Exception e) {
+                    System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
+                    e.printStackTrace();
                 }
             }
         }
@@ -2067,22 +2126,17 @@ private void handlePhaseChange(GamePhase newPhase) {
                 }
                 hasFinished = true;
                 
-                // 到達終點時徹底重置攝影機
-                System.out.println("[CLIENT] Resetting camera to left (cameraOffsetX: " + cameraOffsetX + " -> 0)");
-                cameraOffsetX = 0;
-                FXGL.getGameScene().getViewport().setX(0);
-                
-                // 禁用玩家移動
+                // 禁用玩家移動,但不移動攝影機(回合結束時統一移動)
                 player.getComponent(PlayerControl.class).setEnabled(false);
                 
-                System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms, Camera reset to X=0");
+                System.out.println("[CLIENT] Reached finish! Time: " + finishTime + "ms, player disabled, can now spectate with A/D");
             } catch (Exception e) {
                 System.err.println("[CLIENT ERROR] Failed to send finish message: " + e.getMessage());
             }
         }
         
-        // 檢查掉出地圖
-        if (playerY > SCREEN_HEIGHT + 100) {
+        // 檢查掉出地圖(上下邊界)
+        if (playerY > SCREEN_HEIGHT + 100 || playerY < -100) {
             try {
                 synchronized (out) {
                     out.writeObject(new FailMessage(myPlayerId));
@@ -2091,7 +2145,9 @@ private void handlePhaseChange(GamePhase newPhase) {
                 }
                 hasFailed = true;
                 player.setVisible(false);
-                System.out.println("[CLIENT] Failed - fell off map");
+                // 禁用玩家移動,但允許觀戰
+                player.getComponent(PlayerControl.class).setEnabled(false);
+                System.out.println("[CLIENT] Failed - fell off map (y=" + playerY + "), can spectate with A/D");
             } catch (Exception e) {
                 System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
             }
@@ -2276,7 +2332,7 @@ class PlatformComponent extends Component {
 class PlayerControl extends Component {
     private double speed = 8.0;
     private double velocityX = 0;
-    private double velocityY = 0;
+    public double velocityY = 0;  // 改為public以便死亡檢測使用
     private double jumpStrength = 20.0;
     private double gravity = 1.0;
     private boolean onGround = false;
@@ -2543,5 +2599,44 @@ class BulletComponent extends Component {
         double dx = entity.getX() - playerX;
         double dy = entity.getY() - playerY;
         return Math.sqrt(dx*dx + dy*dy) < radius + 5;
+    }
+}
+
+// 死亡區域組件
+class DeathZoneComponent extends Component {
+    public double width, height;  // 改為public以便死亡檢測使用
+    
+    public DeathZoneComponent(double width, double height) {
+        this.width = width;
+        this.height = height;
+    }
+    
+    // 檢查玩家是否與死亡區重疊(碰撞檢測)
+    public boolean checkCollision(double playerX, double playerY, double playerRadius) {
+        double zoneLeft = entity.getX();
+        double zoneRight = entity.getX() + width;
+        double zoneTop = entity.getY();
+        double zoneBottom = entity.getY() + height;
+        
+        // 使用更寬鬆的檢測 - 玩家中心點在死亡區內或非常接近
+        // 方法1: 簡單的矩形重疊檢測
+        boolean simpleOverlap = (playerX + playerRadius > zoneLeft && 
+                                 playerX - playerRadius < zoneRight && 
+                                 playerY + playerRadius > zoneTop && 
+                                 playerY - playerRadius < zoneBottom);
+        
+        if (simpleOverlap) {
+            return true;
+        }
+        
+        // 方法2: 圓形與矩形的精確碰撞
+        double closestX = Math.max(zoneLeft, Math.min(playerX, zoneRight));
+        double closestY = Math.max(zoneTop, Math.min(playerY, zoneBottom));
+        
+        double distanceX = playerX - closestX;
+        double distanceY = playerY - closestY;
+        double distanceSquared = distanceX * distanceX + distanceY * distanceY;
+        
+        return distanceSquared < (playerRadius * playerRadius);
     }
 }

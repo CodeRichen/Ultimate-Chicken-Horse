@@ -22,9 +22,9 @@ public class MapEditorGUI extends Application {
     private GraphicsContext gc;
     private MapConfig mapConfig;
     
-    // 地圖尺寸
+    // 地圖尺寸(與GameClient一致)
     private static final double MAP_WIDTH = 4800;
-    private static final double MAP_HEIGHT = 700;
+    private static final double MAP_HEIGHT = 1080;  // 遊戲實際高度
     private static final double CANVAS_WIDTH = 1200;
     private static final double CANVAS_HEIGHT = 600;
     private static final double SCALE = CANVAS_WIDTH / MAP_WIDTH;
@@ -175,7 +175,7 @@ public class MapEditorGUI extends Application {
             "• Delete/Backspace 刪除選中\n" +
             "• Ctrl+Z 撤銷上一步\n" +
             "• 起點(綠線): X=50\n" +
-            "• 終點(金線): X=4600\n" +
+            "• 終點(金線): X=4000\n" +
             "• 可達範圍: 0-4800 x 0-700"
         );
         instructions.setEditable(false);
@@ -468,17 +468,17 @@ public class MapEditorGUI extends Application {
         gc.setFill(Color.rgb(144, 238, 144, 0.2));
         gc.fillRect(0, 0, startX, CANVAS_HEIGHT);
         
-        // 繪製終點參考線 (X=4600)
+        // 繪製終點參考線 (X=4000)
         gc.setStroke(Color.GOLD);
         gc.setLineWidth(4);
-        double endX = 4600 * SCALE;
+        double endX = 4000 * SCALE;
         gc.strokeLine(endX, 0, endX, CANVAS_HEIGHT);
         
         // 終點標籤和區域
         gc.setFill(Color.GOLD);
-        gc.fillText("終點 (X=4600)", endX - 100, 20);
+        gc.fillText("終點 (X=4000)", endX - 100, 20);
         gc.setFill(Color.rgb(255, 215, 0, 0.2));
-        gc.fillRect(endX, 0, (MAP_WIDTH - 4600) * SCALE, CANVAS_HEIGHT);
+        gc.fillRect(endX, 0, (MAP_WIDTH - 4000) * SCALE, CANVAS_HEIGHT);
         
         // 繪製地圖範圍標註
         gc.setFill(Color.WHITE);
