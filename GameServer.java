@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class GameServer {
 
-    private static final int PORT = 5000;
+    private static int PORT = 5000; // 預設端口,可從設定檔讀取
     private static final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static final String[] COLORS = {
         "#FF0000", "#00FF00", "#0000FF", "#FFFF00", 
@@ -21,8 +21,49 @@ public class GameServer {
     public static ClientHandler getClientHandler(String playerId) {
         return clients.get(playerId);
     }
+    
+    // 讀取伺服器配置
+    private static void loadServerConfig() {
+        try {
+            File configFile = new File("server_config.txt");
+            if (configFile.exists()) {
+                System.out.println("[SERVER] Loading config from server_config.txt...");
+                try (BufferedReader reader = new BufferedReader(new FileReader(configFile))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        line = line.trim();
+                        // 跳過註釋和空行
+                        if (line.isEmpty() || line.startsWith("#")) {
+                            continue;
+                        }
+                        
+                        // 解析 SERVER_PORT
+                        if (line.startsWith("SERVER_PORT=")) {
+                            String[] parts = line.split("=", 2);
+                            if (parts.length == 2) {
+                                try {
+                                    PORT = Integer.parseInt(parts[1].trim());
+                                    System.out.println("[SERVER] Port loaded from config: " + PORT);
+                                } catch (NumberFormatException e) {
+                                    System.err.println("[SERVER ERROR] Invalid port number in config, using default: " + PORT);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                System.out.println("[SERVER] server_config.txt not found, using default port: " + PORT);
+            }
+        } catch (Exception e) {
+            System.err.println("[SERVER ERROR] Failed to load config: " + e.getMessage());
+            System.err.println("[SERVER] Using default port: " + PORT);
+        }
+    }
 
     public static void main(String[] args) {
+        // 讀取伺服器配置
+        loadServerConfig();
+        
         System.out.println("=================================");
         System.out.println("  Multiplayer Platform Race Server");
         System.out.println("  Port: " + PORT);

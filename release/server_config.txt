@@ -1,0 +1,36 @@
+# Ultimate Chicken Horse - Server Configuration
+# 伺服器配置文件
+# 
+# ==================== 連線方式選擇 ====================
+#
+# 【方式 1: 本地伺服器 (同一台電腦)】
+# SERVER_HOST=127.0.0.1
+# SERVER_PORT=5000
+#
+# 【方式 2: 區域網路 (同一個 WiFi)】
+# SERVER_HOST=192.168.0.181
+# SERVER_PORT=5000
+#
+# 【方式 3: Tailscale VPN (推薦跨網路連線)】
+# 雙方都需要安裝 Tailscale 並登入同一個帳號
+# SERVER_HOST=100.74.204.24
+# SERVER_PORT=5000
+#
+# 【方式 4: Port Forwarding (透過公網 IP)】
+# 伺服器端需要設定路由器的 Port Forwarding
+# 你的公網 IP: 218.164.73.244
+# SERVER_HOST=218.164.73.244
+# SERVER_PORT=5000
+#
+# 注意:
+# - 不要包含 http:// 或 https:// 前綴
+# - 只填入 IP 地址或域名
+# - 確保伺服器已啟動
+#
+# 詳細設定步驟請參考: CONNECTION_GUIDE.txt
+#
+# ======================================================
+
+# 目前使用的配置 (取消註解想用的那一行)
+SERVER_HOST=localhost
+SERVER_PORT=36459

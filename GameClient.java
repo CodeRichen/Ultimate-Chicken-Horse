@@ -21,6 +21,9 @@ import java.util.AbstractMap;
  */
 public class GameClient extends GameApplication {
 
+    private static String SERVER_HOST = "127.0.0.1";
+    private static int SERVER_PORT = 12345;
+    
     private Entity player;
     private List<Entity> platformEntities = new ArrayList<>();
     private Map<String, Entity> otherPlayers = new HashMap<>();
@@ -542,11 +545,20 @@ public class GameClient extends GameApplication {
         player.setVisible(false);
         createGameZones();
         createUI();
+        
+        // 先連接伺服器
         connectToServer();
-        startNetworkThread();
-        startPositionSender();
-        startPlacementPreviewSender();
-        createMainMenu();
+        
+        // 只在連接成功後才啟動網路線程和選單
+        if (connected) {
+            startNetworkThread();
+            startPositionSender();
+            startPlacementPreviewSender();
+            createMainMenu();
+        } else {
+            // 連接失敗,顯示錯誤訊息
+            showConnectionError();
+        }
     }
      private void createMiddlePlatform() {
     // 中間固定平台
@@ -870,10 +882,76 @@ private void hideLeaderboard() {
     System.out.println("[CLIENT] Leaderboard cleared");
 }
     
-    private void connectToServer() {
+    // 讀取伺服器配置
+    private void loadServerConfig() {
         try {
-            System.out.println("[CLIENT] Connecting to server...");
-            socket = new Socket("localhost", 5000);
+            File configFile = new File("server_config.txt");
+            if (configFile.exists()) {
+                System.out.println("[CLIENT] Loading server config from server_config.txt...");
+                try (BufferedReader reader = new BufferedReader(new FileReader(configFile))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        line = line.trim();
+                        // 跳過註釋和空行
+                        if (line.isEmpty() || line.startsWith("#")) {
+                            continue;
+                        }
+                        
+                        // 解析 KEY=VALUE 格式
+                        if (line.contains("=")) {
+                            String[] parts = line.split("=", 2);
+                            if (parts.length == 2) {
+                                String key = parts[0].trim();
+                                String value = parts[1].trim();
+                                
+                                if (key.equals("SERVER_HOST")) {
+                                    SERVER_HOST = value;
+                                    System.out.println("[CLIENT] Loaded SERVER_HOST: " + SERVER_HOST);
+                                } else if (key.equals("SERVER_PORT")) {
+                                    try {
+                                        SERVER_PORT = Integer.parseInt(value);
+                                        System.out.println("[CLIENT] Loaded SERVER_PORT: " + SERVER_PORT);
+                                    } catch (NumberFormatException e) {
+                                        System.err.println("[CLIENT ERROR] Invalid port number: " + value);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                System.out.println("========================================");
+                System.out.println("[CLIENT] Configuration loaded:");
+                System.out.println("  Server: " + SERVER_HOST);
+                System.out.println("  Port: " + SERVER_PORT);
+                if (SERVER_HOST.equals("127.0.0.1") || SERVER_HOST.equals("localhost")) {
+                    System.out.println("  Mode: Local Server (本機伺服器)");
+                } else {
+                    System.out.println("  Mode: Remote Server (遠端伺服器)");
+                }
+                System.out.println("========================================");
+            } else {
+                System.out.println("[CLIENT] server_config.txt not found, using defaults");
+                System.out.println("========================================");
+                System.out.println("[CLIENT] Default configuration:");
+                System.out.println("  Server: " + SERVER_HOST);
+                System.out.println("  Port: " + SERVER_PORT);
+                System.out.println("  Mode: Local Server (本機伺服器)");
+                System.out.println("========================================");
+            }
+        } catch (Exception e) {
+            System.err.println("[CLIENT ERROR] Failed to load config: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private void connectToServer() {
+        loadServerConfig();  // 先讀取配置
+        try {
+            System.out.println("[CLIENT] Connecting to server at " + SERVER_HOST + ":" + SERVER_PORT + "...");
+            
+            // 設定連接超時時間為 5 秒
+            socket = new Socket();
+            socket.connect(new InetSocketAddress(SERVER_HOST, SERVER_PORT), 5000);
             socket.setTcpNoDelay(true);
             
             out = new ObjectOutputStream(socket.getOutputStream());
@@ -895,9 +973,77 @@ private void hideLeaderboard() {
             }
         } catch (Exception e) {
             System.err.println("[CLIENT ERROR] Failed to connect: " + e.getMessage());
-            e.printStackTrace();
             connected = false;
         }
+    }
+    
+    private void showConnectionError() {
+        // 清空所有UI
+        clearAllUI();
+        
+        // 顯示錯誤訊息
+        Text errorTitle = new Text("連接伺服器失敗");
+        errorTitle.setFont(Font.font(40));
+        errorTitle.setFill(Color.RED);
+        Entity titleEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 200, SCREEN_HEIGHT / 2 - 150)
+                .view(errorTitle)
+                .buildAndAttach();
+        menuEntities.add(titleEntity);
+        
+        Text errorMsg = new Text("無法連接到: " + SERVER_HOST + ":" + SERVER_PORT);
+        errorMsg.setFont(Font.font(24));
+        errorMsg.setFill(Color.YELLOW);
+        Entity msgEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2 - 80)
+                .view(errorMsg)
+                .buildAndAttach();
+        menuEntities.add(msgEntity);
+        
+        Text hint1 = new Text("請確認:");
+        hint1.setFont(Font.font(20));
+        hint1.setFill(Color.WHITE);
+        Entity hint1Entity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2)
+                .view(hint1)
+                .buildAndAttach();
+        menuEntities.add(hint1Entity);
+        
+        Text hint2 = new Text("1. 伺服器是否已啟動");
+        hint2.setFont(Font.font(18));
+        hint2.setFill(Color.LIGHTGRAY);
+        Entity hint2Entity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2 + 40)
+                .view(hint2)
+                .buildAndAttach();
+        menuEntities.add(hint2Entity);
+        
+        Text hint3 = new Text("2. server_config.txt 配置是否正確");
+        hint3.setFont(Font.font(18));
+        hint3.setFill(Color.LIGHTGRAY);
+        Entity hint3Entity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2 + 80)
+                .view(hint3)
+                .buildAndAttach();
+        menuEntities.add(hint3Entity);
+        
+        Text hint4 = new Text("3. 防火牆是否允許連線");
+        hint4.setFont(Font.font(18));
+        hint4.setFill(Color.LIGHTGRAY);
+        Entity hint4Entity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 250, SCREEN_HEIGHT / 2 + 120)
+                .view(hint4)
+                .buildAndAttach();
+        menuEntities.add(hint4Entity);
+        
+        Text exitHint = new Text("按 ESC 退出遊戲");
+        exitHint.setFont(Font.font(20));
+        exitHint.setFill(Color.ORANGE);
+        Entity exitEntity = FXGL.entityBuilder()
+                .at(SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 + 200)
+                .view(exitHint)
+                .buildAndAttach();
+        menuEntities.add(exitEntity);
     }
     
     private void startNetworkThread() {
@@ -1600,7 +1746,8 @@ private void handlePhaseChange(GamePhase newPhase) {
                 
                 // 移除所有標記的平台
                 for (Entity entity : toRemove) {
-                    entity.removeFromWorld();
+                    entity.setVisible(false);  // 先設為不可見
+                    entity.removeFromWorld();  // 然後從世界移除
                     platformEntities.remove(entity);
                     deathZones.remove(entity);  // 如果是死亡區也要移除
                 }
@@ -1973,6 +2120,13 @@ private void handlePhaseChange(GamePhase newPhase) {
             phaseText.setText("Waiting for other players...");
             hideFinishButton();
             isDragging = false;
+            
+            // 移除預覽平台
+            if (previewPlatform != null) {
+                previewPlatform.removeFromWorld();
+                previewPlatform = null;
+            }
+            
             // 放置完成後鏡頭歸零
             cameraOffsetX = 0;
             FXGL.getGameScene().getViewport().setX(0);
@@ -2638,5 +2792,21 @@ class DeathZoneComponent extends Component {
         double distanceSquared = distanceX * distanceX + distanceY * distanceY;
         
         return distanceSquared < (playerRadius * playerRadius);
+    }
+}
+
+// 碰撞方向枚舉
+enum CollisionSide {
+    NONE, TOP, BOTTOM, LEFT, RIGHT
+}
+
+// 碰撞資訊類別
+class CollisionInfo {
+    boolean collided;
+    CollisionSide side;
+    
+    public CollisionInfo(boolean collided, CollisionSide side) {
+        this.collided = collided;
+        this.side = side;
     }
 }

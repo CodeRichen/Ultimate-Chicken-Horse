@@ -1,0 +1,98 @@
+========================================
+   HOW TO PLAY OVER INTERNET (ngrok)
+========================================
+
+STEP 1: SERVER SETUP
+====================
+1. Download ngrok from: https://ngrok.com/download
+2. Extract ngrok.exe to any folder
+3. Start your game server (GameServer)
+4. Open command prompt in ngrok folder
+5. Run: ngrok tcp 5000
+6. You will see output like:
+
+   Session Status                online
+   Forwarding                    tcp://2.tcp.ngrok.io:12345 -> localhost:5000
+
+7. Note the address: 2.tcp.ngrok.io
+8. Note the port: 12345
+
+
+STEP 2: CLIENT SETUP
+====================
+1. Open "server_config.txt" in Notepad
+2. Replace "localhost" with: 2.tcp.ngrok.io
+3. Save and close
+
+4. Open "port_config.txt" in Notepad
+5. Replace "5000" with: 12345
+6. Save and close
+
+7. Run "run_client.bat"
+8. Game will connect to the server!
+
+
+EXAMPLE server_config.txt:
+==========================
+# Server Configuration
+# Current server address:
+2.tcp.ngrok.io
+
+
+EXAMPLE port_config.txt:
+========================
+# Server Port Configuration
+# Current server port:
+12345
+
+
+TIPS:
+=====
+- ngrok free account has session limits
+- Keep ngrok running while playing
+- Share the ngrok address with friends
+- Server must be running before starting client
+- Everyone uses the SAME ngrok address and port
+
+
+TROUBLESHOOTING:
+================
+Connection Failed?
+  → Check if server is running
+  → Verify ngrok is still active
+  → Double-check address and port
+
+Tunnel Not Found?
+  → ngrok session expired, restart ngrok
+  → Get new address and update configs
+
+Lag/Delay?
+  → ngrok free tier has some latency
+  → Consider upgrade or LAN play
+
+
+========================================
+     ALTERNATIVE: LOCAL NETWORK
+========================================
+
+FOR LAN/WiFi PLAY (SAME NETWORK):
+==================================
+1. Server finds their local IP:
+   - Windows: ipconfig
+   - Look for "IPv4 Address"
+   - Example: 192.168.1.100
+
+2. Server allows firewall:
+   - Control Panel → Firewall
+   - Allow Java on private network
+
+3. Client updates config:
+   - server_config.txt: 192.168.1.100
+   - port_config.txt: 5000
+
+4. Run and play!
+
+This is faster and more stable than ngrok!
+
+
+========================================
