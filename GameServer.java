@@ -688,7 +688,7 @@ currentRoom.getInfo().totalRounds
             }
             default -> { // NORMAL
                 width = 80 + rand.nextInt(150); height = 15 + rand.nextInt(20);
-                color = String.format("#%06X", rand.nextInt(0xFFFFFF) | 0x800000);
+                color = "#%06X".formatted(rand.nextInt(0xFFFFFF) | 0x800000);
             }
         }
         String key = type + ":" + width + "x" + height;
@@ -790,7 +790,7 @@ class Room {
             playerTotalScores.remove(playerId);
             
             if (playerId.equals(info.hostId) && !info.playerIds.isEmpty()) {
-                info.hostId = info.playerIds.get(0);
+                info.hostId = info.playerIds.getFirst();
                 System.out.println("[ROOM] Host transferred to " + info.hostId);
             }
         }

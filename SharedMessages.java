@@ -1,3 +1,4 @@
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ enum ObjectType {
 
 // 初始化訊息
 class InitMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     String colorHex;
@@ -37,6 +39,7 @@ class InitMessage implements Serializable {
 
 // 階段變更訊息
 class PhaseChangeMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     GamePhase phase;
     
@@ -47,6 +50,7 @@ class PhaseChangeMessage implements Serializable {
 
 // 隨機平台訊息
 class RandomPlatformsMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     List<PlatformPlacement> randomPlatforms;
     
@@ -57,6 +61,7 @@ class RandomPlatformsMessage implements Serializable {
 
 // 物件資訊
 class GameObjectInfo implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     int id;
     int width;
@@ -92,6 +97,7 @@ class GameObjectInfo implements Serializable {
 }
 // 物件列表訊息
 class ObjectListMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     List<GameObjectInfo> objects;
     
@@ -102,6 +108,7 @@ class ObjectListMessage implements Serializable {
 
 // 選擇訊息
 class SelectionMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     int objectId;
@@ -114,6 +121,7 @@ class SelectionMessage implements Serializable {
 
 // 平台放置資訊（包含旋轉角度）
 class PlatformPlacement implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     int id;
     double x;
@@ -142,6 +150,7 @@ class PlatformPlacement implements Serializable {
 
 // 放置訊息（包含是否確認）
 class PlacementMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     PlatformPlacement placement;
@@ -156,6 +165,7 @@ class PlacementMessage implements Serializable {
 
 // 玩家資訊
 class PlayerInfo implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     String colorHex;
@@ -176,6 +186,7 @@ class PlayerInfo implements Serializable {
 
 // 斷線訊息
 class DisconnectMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     
@@ -186,6 +197,7 @@ class DisconnectMessage implements Serializable {
 
 // 完成訊息
 class FinishMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     long finishTime;  // 完成時間（毫秒）
@@ -198,6 +210,7 @@ class FinishMessage implements Serializable {
 
 // 失敗訊息（掉出地圖）
 class FailMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     
@@ -208,6 +221,7 @@ class FailMessage implements Serializable {
 
 // 分數更新訊息
 class ScoreUpdateMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     Map<String, Integer> scores;
     
@@ -218,6 +232,7 @@ class ScoreUpdateMessage implements Serializable {
 
 // 回合結束訊息（顯示排行榜）
 class RoundEndMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     Map<String, Integer> roundScores;  // 本回合分數
     Map<String, Integer> totalScores;  // 總分

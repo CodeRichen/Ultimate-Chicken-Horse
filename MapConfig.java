@@ -5,6 +5,7 @@ import java.util.*;
  * 地圖配置類 - 用於存儲和加載預設平台
  */
 class MapPlatform implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     double x, y;
     int width, height;
@@ -24,8 +25,8 @@ class MapPlatform implements Serializable {
     
     @Override
     public String toString() {
-        return String.format("Platform[type=%s, pos=(%.0f,%.0f), size=%dx%d, rot=%.0f°]", 
-                           type, x, y, width, height, rotation);
+        return "Platform[type=%s, pos=(%.0f,%.0f), size=%dx%d, rot=%.0f°]".formatted(
+                type, x, y, width, height, rotation);
     }
 }
 

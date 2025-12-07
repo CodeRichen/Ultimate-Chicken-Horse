@@ -967,7 +967,7 @@ private void hideLeaderboard() {
                 
                 if (player != null && player.getViewComponent() != null && 
                     !player.getViewComponent().getChildren().isEmpty()) {
-                    Circle circle = (Circle) player.getViewComponent().getChildren().get(0);
+                    Circle circle = (Circle) player.getViewComponent().getChildren().getFirst();
                     circle.setFill(myColor);
                 }
             }
@@ -1463,7 +1463,7 @@ private void handlePhaseChange(GamePhase newPhase) {
             
             Entity preview = otherPreviewEntities.remove(msg.playerId);
             if (preview != null) {
-                javafx.scene.shape.Rectangle rect = (javafx.scene.shape.Rectangle) preview.getViewComponent().getChildren().get(0);
+                javafx.scene.shape.Rectangle rect = (javafx.scene.shape.Rectangle) preview.getViewComponent().getChildren().getFirst();
                 rect.setOpacity(0.3);  // 更透明
                 rect.setStroke(Color.GREEN);  // 綠色邊框
                 rect.setStrokeWidth(3);
@@ -1762,10 +1762,10 @@ private void handlePhaseChange(GamePhase newPhase) {
     }
     
     private String toHex(Color color) {
-        return String.format("#%02X%02X%02X",
-            (int)(color.getRed() * 255),
-            (int)(color.getGreen() * 255),
-            (int)(color.getBlue() * 255));
+        return "#%02X%02X%02X".formatted(
+                (int)(color.getRed() * 255),
+                (int)(color.getGreen() * 255),
+                (int)(color.getBlue() * 255));
     }
 
     @Override

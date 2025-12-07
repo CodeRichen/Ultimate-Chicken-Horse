@@ -169,14 +169,15 @@ public class MapEditorGUI extends Application {
         instructionLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: white;");
         
         TextArea instructions = new TextArea(
-            "• 按住滑鼠左鍵拖曳矩形區域\n" +
-            "  拖曳的範圍即為平台大小\n" +
-            "• 點擊平台選中，拖曳移動\n" +
-            "• Delete/Backspace 刪除選中\n" +
-            "• Ctrl+Z 撤銷上一步\n" +
-            "• 起點(綠線): X=50\n" +
-            "• 終點(金線): X=4000\n" +
-            "• 可達範圍: 0-4800 x 0-700"
+            """
+            • 按住滑鼠左鍵拖曳矩形區域
+              拖曳的範圍即為平台大小
+            • 點擊平台選中，拖曳移動
+            • Delete/Backspace 刪除選中
+            • Ctrl+Z 撤銷上一步
+            • 起點(綠線): X=50
+            • 終點(金線): X=4000
+            • 可達範圍: 0-4800 x 0-700"""
         );
         instructions.setEditable(false);
         instructions.setPrefRowCount(8);
@@ -341,7 +342,7 @@ public class MapEditorGUI extends Application {
     private void handleMouseMoved(MouseEvent e) {
         double worldX = e.getX() / SCALE;
         double worldY = e.getY() / SCALE;
-        coordLabel.setText(String.format("座標: (%.0f, %.0f)", worldX, worldY));
+        coordLabel.setText("座標: (%.0f, %.0f)".formatted(worldX, worldY));
     }
     
     private void createPlatform(double x, double y, int width, int height) {
@@ -508,7 +509,7 @@ public class MapEditorGUI extends Application {
             
             // 顯示尺寸
             gc.setFill(Color.WHITE);
-            gc.fillText(String.format("%.0fx%.0f", w / SCALE, h / SCALE), x + 5, y + 15);
+            gc.fillText("%.0fx%.0f".formatted(w / SCALE, h / SCALE), x + 5, y + 15);
         }
     }
     
@@ -632,7 +633,7 @@ public class MapEditorGUI extends Application {
         
         // 如果不在歷史末尾，清除後續歷史
         while (historyIndex < history.size() - 1) {
-            history.remove(history.size() - 1);
+            history.removeLast();
         }
         
         // 添加新狀態
@@ -641,7 +642,7 @@ public class MapEditorGUI extends Application {
         
         // 限制歷史記錄數量
         if (history.size() > MAX_HISTORY) {
-            history.remove(0);
+            history.removeFirst();
             historyIndex--;
         }
     }
