@@ -1,17 +1,37 @@
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import javafx.application.Application;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.control.*;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.Separator;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
+import javafx.scene.image.Image;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
-import javafx.scene.layout.*;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 圖形化地圖編輯器 - 使用拖曳方式創建平台
@@ -53,6 +73,15 @@ public class MapEditorGUI extends Application {
     private Spinner<Integer> widthSpinner;
     private Spinner<Integer> heightSpinner;
     private Spinner<Double> rotationSpinner;
+    private TextField imagePathField;
+    private Button browseImageButton;
+    private String currentImagePath = null;
+    private boolean lockImageSize = false;  // 選擇圖片時固定其原始尺寸
+    private double lockedImageWidth = 0;
+    private double lockedImageHeight = 0;
+    
+    // 圖片快取
+    private Map<String, Image> imageCache = new HashMap<>();
     
     @Override
     public void start(Stage primaryStage) {
@@ -162,6 +191,33 @@ public class MapEditorGUI extends Application {
         rotationSpinner.setEditable(true);
         rotationSpinner.setMaxWidth(Double.MAX_VALUE);
         
+        // 圖片選擇
+        Label imageLabel = new Label("平台圖片 (選填):");
+        imageLabel.setStyle("-fx-text-fill: white;");
+        
+        HBox imageBox = new HBox(5);
+        imagePathField = new TextField();
+        imagePathField.setPromptText("選擇圖片或留空使用顏色");
+        imagePathField.setEditable(false);
+        imagePathField.setPrefWidth(200);
+        
+        browseImageButton = new Button("瀏覽...");
+        browseImageButton.setOnAction(e -> browseImage());
+        
+        Button clearImageButton = new Button("清除");
+        clearImageButton.setOnAction(e -> {
+            currentImagePath = null;
+            lockImageSize = false;
+            lockedImageWidth = 0;
+            lockedImageHeight = 0;
+            imagePathField.clear();
+            widthSpinner.setDisable(false);
+            heightSpinner.setDisable(false);
+            statusLabel.setText("已清除圖片，將使用顏色");
+        });
+        
+        imageBox.getChildren().addAll(imagePathField, browseImageButton, clearImageButton);
+        
         Separator sep1 = new Separator();
         
         // 操作說明
@@ -169,17 +225,20 @@ public class MapEditorGUI extends Application {
         instructionLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: white;");
         
         TextArea instructions = new TextArea(
-            "• 按住滑鼠左鍵拖曳矩形區域\n" +
-            "  拖曳的範圍即為平台大小\n" +
-            "• 點擊平台選中，拖曳移動\n" +
-            "• Delete/Backspace 刪除選中\n" +
-            "• Ctrl+Z 撤銷上一步\n" +
-            "• 起點(綠線): X=50\n" +
-            "• 終點(金線): X=4000\n" +
-            "• 可達範圍: 0-4800 x 0-700"
+            """
+            • 按住滑鼠左鍵拖曳矩形區域
+              拖曳的範圍即為平台大小
+            • 可選擇圖片作為平台材質
+              支援 PNG, JPG, GIF, BMP 等格式
+            • 點擊平台選中，拖曳移動
+            • Delete/Backspace 刪除選中
+            • Ctrl+Z 撤銷上一步
+            • 起點(綠線): X=50
+            • 終點(金線): X=4000
+            • 可達範圍: 0-4800 x 0-700"""
         );
         instructions.setEditable(false);
-        instructions.setPrefRowCount(8);
+        instructions.setPrefRowCount(9);
         instructions.setWrapText(true);
         instructions.setStyle("-fx-control-inner-background: #2b2b2b; -fx-text-fill: #aaa;");
         
@@ -222,6 +281,7 @@ public class MapEditorGUI extends Application {
             widthLabel, widthSpinner,
             heightLabel, heightSpinner,
             rotationLabel, rotationSpinner,
+            imageLabel, imageBox,
             sep1,
             instructionLabel, instructions,
             sep2,
@@ -315,6 +375,19 @@ public class MapEditorGUI extends Application {
             double worldX = e.getX() / SCALE;
             double worldY = e.getY() / SCALE;
             
+            // 圖片模式：固定圖片原始尺寸
+            if (lockImageSize && currentImagePath != null) {
+                double x = Math.min(dragStartX, worldX);
+                double y = Math.min(dragStartY, worldY);
+                int w = (int)Math.round(lockedImageWidth);
+                int h = (int)Math.round(lockedImageHeight);
+                createPlatform(x, y, w, h);
+                statusLabel.setText("✓ 已以圖片尺寸創建平台");
+                isDragging = false;
+                redraw();
+                return;
+            }
+
             double x = Math.min(dragStartX, worldX);
             double y = Math.min(dragStartY, worldY);
             double width = Math.abs(worldX - dragStartX);
@@ -341,7 +414,7 @@ public class MapEditorGUI extends Application {
     private void handleMouseMoved(MouseEvent e) {
         double worldX = e.getX() / SCALE;
         double worldY = e.getY() / SCALE;
-        coordLabel.setText(String.format("座標: (%.0f, %.0f)", worldX, worldY));
+        coordLabel.setText("座標: (%.0f, %.0f)".formatted(worldX, worldY));
     }
     
     private void createPlatform(double x, double y, int width, int height) {
@@ -349,17 +422,19 @@ public class MapEditorGUI extends Application {
         String color = getColorForType(typeStr);
         double rotation = rotationSpinner.getValue();
         
-        // 使用拖曳的實際大小，而不是 Spinner 的值
-        // width 和 height 參數已經是拖曳區域的大小
+        int finalW = width;
+        int finalH = height;
+        if (lockImageSize && currentImagePath != null) {
+            finalW = (int)Math.round(lockedImageWidth);
+            finalH = (int)Math.round(lockedImageHeight);
+        }
         
-        MapPlatform platform = new MapPlatform(x, y, width, height, color, rotation, typeStr);
+        MapPlatform platform = new MapPlatform(x, y, finalW, finalH, color, rotation, typeStr, currentImagePath);
         mapConfig.addPlatform(platform);
         
-        // 更新 Spinner 顯示當前創建的大小
-        widthSpinner.getValueFactory().setValue(width);
-        heightSpinner.getValueFactory().setValue(height);
+        widthSpinner.getValueFactory().setValue(finalW);
+        heightSpinner.getValueFactory().setValue(finalH);
         
-        // 保存到歷史
         saveToHistory();
         
         System.out.println("已創建平台: " + platform);
@@ -494,21 +569,25 @@ public class MapEditorGUI extends Application {
         
         // 繪製正在拖曳的矩形
         if (isDragging) {
-            double x = Math.min(dragStartX, dragEndX) * SCALE;
-            double y = Math.min(dragStartY, dragEndY) * SCALE;
-            double w = Math.abs(dragEndX - dragStartX) * SCALE;
-            double h = Math.abs(dragEndY - dragStartY) * SCALE;
+            double baseX = Math.min(dragStartX, dragEndX);
+            double baseY = Math.min(dragStartY, dragEndY);
+            double w = lockImageSize ? lockedImageWidth : Math.abs(dragEndX - dragStartX);
+            double h = lockImageSize ? lockedImageHeight : Math.abs(dragEndY - dragStartY);
+            double x = baseX * SCALE;
+            double y = baseY * SCALE;
+            double wPx = w * SCALE;
+            double hPx = h * SCALE;
             
             gc.setFill(Color.web(getColorForType(currentMode), 0.3));
-            gc.fillRect(x, y, w, h);
+            gc.fillRect(x, y, wPx, hPx);
             
             gc.setStroke(Color.YELLOW);
             gc.setLineWidth(2);
-            gc.strokeRect(x, y, w, h);
+            gc.strokeRect(x, y, wPx, hPx);
             
             // 顯示尺寸
             gc.setFill(Color.WHITE);
-            gc.fillText(String.format("%.0fx%.0f", w / SCALE, h / SCALE), x + 5, y + 15);
+            gc.fillText("%.0fx%.0f".formatted(w, h), x + 5, y + 15);
         }
     }
     
@@ -528,9 +607,21 @@ public class MapEditorGUI extends Application {
             gc.translate(-(x + w/2), -(y + h/2));
         }
         
-        // 繪製平台
-        gc.setFill(Color.web(p.color, 0.8));
-        gc.fillRect(x, y, w, h);
+        // 繪製平台 - 優先使用圖片，否則使用顏色
+        if (p.imagePath != null && !p.imagePath.isEmpty()) {
+            Image img = loadImage(p.imagePath);
+            if (img != null) {
+                gc.drawImage(img, x, y, w, h);
+            } else {
+                // 圖片載入失敗，使用顏色
+                gc.setFill(Color.web(p.color, 0.8));
+                gc.fillRect(x, y, w, h);
+            }
+        } else {
+            // 沒有圖片，使用顏色
+            gc.setFill(Color.web(p.color, 0.8));
+            gc.fillRect(x, y, w, h);
+        }
         
         // 繪製邊框
         if (selected) {
@@ -547,7 +638,11 @@ public class MapEditorGUI extends Application {
         
         // 繪製標籤（不旋轉）
         gc.setFill(Color.WHITE);
-        gc.fillText(p.type, x + 2, y + 12);
+        String label = p.type;
+        if (p.imagePath != null && !p.imagePath.isEmpty()) {
+            label += " 🖼️";
+        }
+        gc.fillText(label, x + 2, y + 12);
     }
     
     private void saveMap() {
@@ -627,7 +722,7 @@ public class MapEditorGUI extends Application {
         // 創建當前狀態的深拷貝
         List<MapPlatform> snapshot = new ArrayList<>();
         for (MapPlatform p : mapConfig.getPlatforms()) {
-            snapshot.add(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type));
+            snapshot.add(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type, p.imagePath));
         }
         
         // 如果不在歷史末尾，清除後續歷史
@@ -654,7 +749,7 @@ public class MapEditorGUI extends Application {
             // 恢復到之前的狀態
             mapConfig.clearPlatforms();
             for (MapPlatform p : previousState) {
-                mapConfig.addPlatform(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type));
+                mapConfig.addPlatform(new MapPlatform(p.x, p.y, p.width, p.height, p.color, p.rotation, p.type, p.imagePath));
             }
             
             selectedPlatform = null;
@@ -662,7 +757,70 @@ public class MapEditorGUI extends Application {
             redraw();
             statusLabel.setText("↶ 已撤銷，回到步驟 " + historyIndex);
         } else {
-            statusLabel.setText("沒有可撤銷的操作");
+            statusLabel.setText("✓ 已創建預設地圖");
+        }
+    }
+    
+    /**
+     * 瀏覽並選擇圖片檔案
+     */
+    private void browseImage() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("選擇平台圖片");
+        fileChooser.getExtensionFilters().addAll(
+            new FileChooser.ExtensionFilter("圖片檔案", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp"),
+            new FileChooser.ExtensionFilter("PNG 檔案", "*.png"),
+            new FileChooser.ExtensionFilter("JPEG 檔案", "*.jpg", "*.jpeg"),
+            new FileChooser.ExtensionFilter("所有檔案", "*.*")
+        );
+        
+        File file = fileChooser.showOpenDialog(canvas.getScene().getWindow());
+        if (file != null && file.exists()) {
+            currentImagePath = file.getAbsolutePath();
+            Image img = loadImage(currentImagePath);
+            if (img != null) {
+                lockedImageWidth = img.getWidth();
+                lockedImageHeight = img.getHeight();
+                lockImageSize = true;
+                imagePathField.setText(file.getName());
+                widthSpinner.setDisable(true);
+                heightSpinner.setDisable(true);
+                widthSpinner.getValueFactory().setValue((int)Math.round(lockedImageWidth));
+                heightSpinner.getValueFactory().setValue((int)Math.round(lockedImageHeight));
+                statusLabel.setText("✓ 已選擇圖片並鎖定尺寸: " + file.getName());
+            } else {
+                statusLabel.setText("✗ 載入圖片失敗");
+            }
+        }
+    }
+    
+    /**
+     * 載入圖片並快取
+     */
+    private Image loadImage(String imagePath) {
+        if (imagePath == null || imagePath.isEmpty()) {
+            return null;
+        }
+        
+        // 檢查快取
+        if (imageCache.containsKey(imagePath)) {
+            return imageCache.get(imagePath);
+        }
+        
+        // 載入圖片
+        try {
+            File file = new File(imagePath);
+            if (file.exists()) {
+                Image image = new Image(new FileInputStream(file));
+                imageCache.put(imagePath, image);
+                return image;
+            } else {
+                System.err.println("圖片檔案不存在: " + imagePath);
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("載入圖片失敗: " + imagePath + " - " + e.getMessage());
+            return null;
         }
     }
     

@@ -1,3 +1,4 @@
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +22,7 @@ enum RoomState {
 
 // 房間資訊
 class RoomInfo implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String roomCode;
     String hostId;
@@ -31,6 +33,8 @@ class RoomInfo implements Serializable {
     int totalRounds;
     Map<String, Boolean> readyStatus;
     RoomType roomType;
+    // 依加入順序給玩家編號（Player 1, Player 2 ...）
+    Map<String, Integer> playerOrder;
     
     public RoomInfo(String roomCode, String hostId, int maxPlayers, RoomType roomType) {
         this.roomCode = roomCode;
@@ -44,11 +48,14 @@ class RoomInfo implements Serializable {
         this.readyStatus = new HashMap<>();
         this.readyStatus.put(hostId, false);
         this.roomType = roomType;
+        this.playerOrder = new HashMap<>();
+        this.playerOrder.put(hostId, 1); // 房主為 Player 1
     }
 }
 
 // 創建房間請求
 class CreateRoomRequest implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     int maxPlayers;
     RoomType roomType;
@@ -61,6 +68,7 @@ class CreateRoomRequest implements Serializable {
 
 // 創建房間回應
 class CreateRoomResponse implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     boolean success;
     String roomCode;
@@ -75,6 +83,7 @@ class CreateRoomResponse implements Serializable {
 
 // 加入房間請求
 class JoinRoomRequest implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String roomCode;
     
@@ -85,11 +94,13 @@ class JoinRoomRequest implements Serializable {
 
 // 隨機加入公共房間請求
 class JoinRandomRoomRequest implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
 }
 
 // 加入房間回應
 class JoinRoomResponse implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     boolean success;
     String message;
@@ -104,6 +115,7 @@ class JoinRoomResponse implements Serializable {
 
 // 房間更新訊息
 class RoomUpdateMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     RoomInfo roomInfo;
     
@@ -114,6 +126,7 @@ class RoomUpdateMessage implements Serializable {
 
 // 玩家準備狀態訊息
 class PlayerReadyMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     boolean ready;
@@ -126,11 +139,13 @@ class PlayerReadyMessage implements Serializable {
 
 // 開始遊戲請求（僅房主）
 class StartGameRequest implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
 }
 
 // 遊戲結束後返回房間訊息
 class ReturnToRoomMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String message;
     
@@ -141,6 +156,7 @@ class ReturnToRoomMessage implements Serializable {
 
 // 離開房間請求
 class LeaveRoomRequest implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
 }
 
@@ -158,7 +174,7 @@ class RoomManager {
     public static String generateRoomCode() {
         String code;
         do {
-            code = String.format("%04d", random.nextInt(10000));
+            code = "%04d".formatted(random.nextInt(10000));
         } while (rooms.containsKey(code));
         return code;
     }

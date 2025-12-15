@@ -1,18 +1,32 @@
-import java.io.*;
-import java.util.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 地圖配置類 - 用於存儲和加載預設平台
+ * 地圖平台類 - 用於存儲平台資訊
  */
 class MapPlatform implements Serializable {
-    private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = 2L;  // 版本更新
     double x, y;
     int width, height;
     String color;
     double rotation;
     String type;  // "NORMAL", "DEATH", "BOUNCE", etc.
+    String imagePath;  // 圖片檔案路徑 (支援 jpg, png 等)
     
     public MapPlatform(double x, double y, int width, int height, String color, double rotation, String type) {
+        this(x, y, width, height, color, rotation, type, null);
+    }
+    
+    public MapPlatform(double x, double y, int width, int height, String color, double rotation, String type, String imagePath) {
         this.x = x;
         this.y = y;
         this.width = width;
@@ -20,12 +34,14 @@ class MapPlatform implements Serializable {
         this.color = color;
         this.rotation = rotation;
         this.type = type;
+        this.imagePath = imagePath;
     }
     
     @Override
     public String toString() {
-        return String.format("Platform[type=%s, pos=(%.0f,%.0f), size=%dx%d, rot=%.0f°]", 
-                           type, x, y, width, height, rotation);
+        String imgInfo = (imagePath != null && !imagePath.isEmpty()) ? ", img=" + new File(imagePath).getName() : "";
+        return "Platform[type=%s, pos=(%.0f,%.0f), size=%dx%d, rot=%.0f°%s]".formatted(
+                type, x, y, width, height, rotation, imgInfo);
     }
 }
 

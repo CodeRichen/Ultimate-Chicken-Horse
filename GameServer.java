@@ -1,6 +1,23 @@
-import java.io.*;
-import java.net.*;
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.EOFException;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.StreamCorruptedException;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -9,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class GameServer {
 
-    private static int PORT = 5000; // 預設端口,可從設定檔讀取
+    private static int PORT = 36459; // 預設端口,可從設定檔讀取
     private static final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private static final String[] COLORS = {
         "#FF0000", "#00FF00", "#0000FF", "#FFFF00", 
@@ -145,6 +162,12 @@ public class GameServer {
                                 broadcastToRoom(info, playerId);
                             }
                         } 
+                        else if (obj instanceof CharacterSelectionMessage charMsg) {
+                            charMsg.playerId = playerId;
+                            if (currentRoom != null) {
+                                broadcastToRoom(charMsg, playerId);
+                            }
+                        }
                         else if (obj instanceof SelectionMessage selectionMsg) {
                             if (currentRoom != null) {
                                 handleSelection(selectionMsg);
@@ -651,54 +674,95 @@ currentRoom.getInfo().totalRounds
         private List<GameObjectInfo> generateNewObjects() {
             List<GameObjectInfo> objects = new ArrayList<>();
             Random rand = new Random();
-        // 原始數量 8-10，現在加倍 => 16-20
-        int originalCount = 8 + rand.nextInt(3);
-        int targetCount = Math.min(20, originalCount * 2); // 上限 20
+            
+            // 每個類型只生成一個平台
+            int idCounter = 0;
+            
+            for (ObjectType type : ObjectType.values()) {
+                int width, height;
+                String color;
+                double moveSpeed = 0, moveRange = 0, fireRate = 0;
 
-    // 為避免"重疊"（此處解讀為重複屬性）採用唯一性鍵值 (type+width+height) 防止相同規格重複
-    Set<String> uniqueness = new HashSet<>();
-    int idCounter = 0;
-    int attempts = 0;
-    while (objects.size() < targetCount && attempts < 400) {
-        attempts++;
-        ObjectType type = ObjectType.values()[rand.nextInt(ObjectType.values().length)];
-        int width, height; String color; double moveSpeed = 0, moveRange = 0, fireRate = 0, rotateSpeed = 0;
-        switch(type) {
-            case DEATH -> {
-                width = 100 + rand.nextInt(80);
-                height = 20 + rand.nextInt(10);
-                color = "#FF0000";
+                //大小固定，這樣我在aseprite 畫的時候才不會圖形歪掉
+                switch(type) {
+                    case DEATH -> {
+                        width = 140;
+                        height = 30;
+                        color = "#FF0000";
+                    }
+                    case ERASER -> {
+                        width = 150;
+                        height = 150;
+                        color = "#FFAAFF";
+                    }
+                    case MOVING_H -> {
+                        width = 150;
+                        height = 30;
+                        color = "#00AAFF";
+                        moveSpeed = 2 + rand.nextDouble() * 2;
+                        moveRange = 200 + rand.nextInt(200);
+                    }
+                    case MOVING_V -> {
+                        width = 150;
+                        height = 30;
+                        color = "#AA00FF";
+                        moveSpeed = 2 + rand.nextDouble() * 2;
+                        moveRange = 150 + rand.nextInt(150);
+                    }
+                    case BOUNCE -> {
+                        width = 130;
+                        height = 30;
+                        color = "#00FF00";
+                    }
+                    case TURRET -> {
+                        width = 80;
+                        height = 80;
+                        color = "#FF6600";
+                        fireRate = 2 + rand.nextDouble() * 2;
+                    }
+                    case ROTATING -> {
+                        width = 160;
+                        height = 25;
+                        color = "#FFD166";
+                        // 將 moveSpeed 作為旋轉速度 (deg/sec)
+                        moveSpeed = 60 + rand.nextDouble() * 30; // 60~90 deg/sec
+                    }
+                    default -> { // NORMAL
+                        width = 100;
+                        height = 30;
+                        color = "#%06X".formatted(rand.nextInt(0xFFFFFF) | 0x800000);
+                    }
+                }
+
+                String imagePath = resolveImagePath(type);
+                GameObjectInfo obj = new GameObjectInfo(idCounter++, width, height, color, type, moveSpeed, moveRange, fireRate, imagePath);
+                objects.add(obj);
+                System.out.println("[SERVER] Generated " + type + " object: " + obj.width + "x" + obj.height + ", imagePath=" + imagePath);
             }
-            case ERASER -> {
-                width = 150; height = 150; color = "#FFAAFF";
-            }
-            case MOVING_H -> {
-                width = 120 + rand.nextInt(50); height = 20 + rand.nextInt(10); color = "#00AAFF";
-                moveSpeed = 2 + rand.nextDouble() * 2; moveRange = 200 + rand.nextInt(200);
-            }
-            case MOVING_V -> {
-                width = 120 + rand.nextInt(50); height = 20 + rand.nextInt(10); color = "#AA00FF";
-                moveSpeed = 2 + rand.nextDouble() * 2; moveRange = 150 + rand.nextInt(150);
-            }
-            case BOUNCE -> {
-                width = 100 + rand.nextInt(60); height = 25 + rand.nextInt(10); color = "#00FF00";
-            }
-            case TURRET -> {
-                width = 80; height = 80; color = "#FF6600"; fireRate = 2 + rand.nextDouble() * 2;
-            }
-            default -> { // NORMAL
-                width = 80 + rand.nextInt(150); height = 15 + rand.nextInt(20);
-                color = String.format("#%06X", rand.nextInt(0xFFFFFF) | 0x800000);
-            }
+            
+            return objects;
         }
-        String key = type + ":" + width + "x" + height;
-        if (uniqueness.contains(key)) continue; // 避免重複規格
-        uniqueness.add(key);
-        GameObjectInfo obj = new GameObjectInfo(idCounter++, width, height, color, type, moveSpeed, moveRange, fireRate);
-        objects.add(obj);
+
+    /**
+     * 依物件類型給預設圖片；若檔案不存在則回傳 null 讓客戶端使用顏色回退。
+     */
+    private String resolveImagePath(ObjectType type) {
+        // 依需求替換成你的圖片檔案；放在專案內「map picture」資料夾
+        String path = switch (type) {
+            case NORMAL -> "map picture/normal.png";
+            case DEATH -> "map picture/death.png";
+            case BOUNCE -> "map picture/bounce.png";
+            case MOVING_H -> "map picture/moving_h.png";
+            case MOVING_V -> "map picture/moving_v.png";
+            case ERASER -> "map picture/eraser.png";
+            case TURRET -> "map picture/turret.png";
+            case ROTATING -> "map picture/rotating.png";
+            default -> null;
+        };
+        if (path == null) return null;
+        java.io.File f = new java.io.File(path);
+        return f.exists() ? path : null;
     }
-    return objects;
-}
 
         boolean sendObject(Object obj) {
             try {
@@ -777,6 +841,9 @@ class Room {
                 info.playerIds.add(playerId);
                 info.readyStatus.put(playerId, false);
                 playerTotalScores.put(playerId, 0);
+                // 按加入順序分配 Player 編號
+                int order = info.playerOrder.size() + 1;
+                info.playerOrder.put(playerId, order);
                 return true;
             }
             return false;
@@ -788,9 +855,10 @@ class Room {
             info.playerIds.remove(playerId);
             info.readyStatus.remove(playerId);
             playerTotalScores.remove(playerId);
+            info.playerOrder.remove(playerId);
             
             if (playerId.equals(info.hostId) && !info.playerIds.isEmpty()) {
-                info.hostId = info.playerIds.get(0);
+                info.hostId = info.playerIds.getFirst();
                 System.out.println("[ROOM] Host transferred to " + info.hostId);
             }
         }
@@ -838,9 +906,16 @@ class Room {
                 // 轉換為 PlatformPlacement 列表
                 List<PlatformPlacement> mapPlacements = new ArrayList<>();
                 for (MapPlatform mp : platforms) {
-                    mapPlacements.add(new PlatformPlacement(-1, mp.x, mp.y, 
-                                                           mp.width, mp.height, 
-                                                           mp.color, mp.rotation));
+                    mapPlacements.add(new PlatformPlacement(
+                        -1,
+                        mp.x,
+                        mp.y,
+                        mp.width,
+                        mp.height,
+                        mp.color,
+                        mp.rotation,
+                        mp.imagePath
+                    ));
                 }
                 
                 // 發送給房間內所有玩家
@@ -890,6 +965,7 @@ class Room {
         copy.currentRound = info.currentRound;
         copy.totalRounds = info.totalRounds;
         copy.readyStatus = new HashMap<>(info.readyStatus);
+        copy.playerOrder = new HashMap<>(info.playerOrder);
         return copy;
     }
 }

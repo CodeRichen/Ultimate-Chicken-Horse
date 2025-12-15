@@ -1,3 +1,4 @@
+import java.io.Serial;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ enum ObjectType {
 
 // 初始化訊息
 class InitMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     String colorHex;
@@ -37,6 +39,7 @@ class InitMessage implements Serializable {
 
 // 階段變更訊息
 class PhaseChangeMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     GamePhase phase;
     
@@ -47,6 +50,7 @@ class PhaseChangeMessage implements Serializable {
 
 // 隨機平台訊息
 class RandomPlatformsMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     List<PlatformPlacement> randomPlatforms;
     
@@ -57,13 +61,15 @@ class RandomPlatformsMessage implements Serializable {
 
 // 物件資訊
 class GameObjectInfo implements Serializable {
-    private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = 2L;
     int id;
     int width;
     int height;
     String color;
     ObjectType type;
     boolean selected;  // 是否已被選擇
+    String imagePath;   // 預設平台圖片路徑（用於玩家放置後的實際顯示）
     
     // 特殊屬性
     double moveSpeed;   // 移動速度
@@ -72,13 +78,13 @@ class GameObjectInfo implements Serializable {
     
     // 舊版建構子（向下相容）
     public GameObjectInfo(int id, int width, int height, String color) {
-        this(id, width, height, color, ObjectType.NORMAL, 0, 0, 0);
+        this(id, width, height, color, ObjectType.NORMAL, 0, 0, 0, null);
     }
     
     // 完整建構子
     public GameObjectInfo(int id, int width, int height, String color, 
                          ObjectType type, double moveSpeed, double moveRange, 
-                         double fireRate) {
+                         double fireRate, String imagePath) {
         this.id = id;
         this.width = width;
         this.height = height;
@@ -88,10 +94,12 @@ class GameObjectInfo implements Serializable {
         this.moveSpeed = moveSpeed;
         this.moveRange = moveRange;
         this.fireRate = fireRate;
+        this.imagePath = imagePath;
     }
 }
 // 物件列表訊息
 class ObjectListMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     List<GameObjectInfo> objects;
     
@@ -100,8 +108,22 @@ class ObjectListMessage implements Serializable {
     }
 }
 
+// 角色選擇訊息
+class CharacterSelectionMessage implements Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
+    String playerId;
+    int characterIndex; // 1, 2, or 3
+    
+    public CharacterSelectionMessage(String playerId, int characterIndex) {
+        this.playerId = playerId;
+        this.characterIndex = characterIndex;
+    }
+}
+
 // 選擇訊息
 class SelectionMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     int objectId;
@@ -114,7 +136,8 @@ class SelectionMessage implements Serializable {
 
 // 平台放置資訊（包含旋轉角度）
 class PlatformPlacement implements Serializable {
-    private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = 2L;
     int id;
     double x;
     double y;
@@ -122,14 +145,20 @@ class PlatformPlacement implements Serializable {
     int height;
     String color;
     double rotation;  // 旋轉角度
+    String imagePath; // 自訂平台圖片路徑（可為 null）
     
-    // 相容舊版本的建構子（沒有 rotation）
+    // 相容舊版本的建構子（沒有 rotation 或圖片）
     public PlatformPlacement(int id, double x, double y, int width, int height, String color) {
-        this(id, x, y, width, height, color, 0.0);
+        this(id, x, y, width, height, color, 0.0, null);
     }
     
-    // 完整建構子（包含 rotation）
+    // 相容舊版本的建構子（有 rotation，沒有圖片）
     public PlatformPlacement(int id, double x, double y, int width, int height, String color, double rotation) {
+        this(id, x, y, width, height, color, rotation, null);
+    }
+    
+    // 完整建構子（包含 rotation 與圖片路徑）
+    public PlatformPlacement(int id, double x, double y, int width, int height, String color, double rotation, String imagePath) {
         this.id = id;
         this.x = x;
         this.y = y;
@@ -137,11 +166,13 @@ class PlatformPlacement implements Serializable {
         this.height = height;
         this.color = color;
         this.rotation = rotation;
+        this.imagePath = imagePath;
     }
 }
 
 // 放置訊息（包含是否確認）
 class PlacementMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     PlatformPlacement placement;
@@ -156,6 +187,7 @@ class PlacementMessage implements Serializable {
 
 // 玩家資訊
 class PlayerInfo implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     String colorHex;
@@ -176,6 +208,7 @@ class PlayerInfo implements Serializable {
 
 // 斷線訊息
 class DisconnectMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     
@@ -186,6 +219,7 @@ class DisconnectMessage implements Serializable {
 
 // 完成訊息
 class FinishMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     long finishTime;  // 完成時間（毫秒）
@@ -198,6 +232,7 @@ class FinishMessage implements Serializable {
 
 // 失敗訊息（掉出地圖）
 class FailMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     String playerId;
     
@@ -208,6 +243,7 @@ class FailMessage implements Serializable {
 
 // 分數更新訊息
 class ScoreUpdateMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     Map<String, Integer> scores;
     
@@ -218,6 +254,7 @@ class ScoreUpdateMessage implements Serializable {
 
 // 回合結束訊息（顯示排行榜）
 class RoundEndMessage implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
     Map<String, Integer> roundScores;  // 本回合分數
     Map<String, Integer> totalScores;  // 總分
