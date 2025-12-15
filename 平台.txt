@@ -1,0 +1,8 @@
+death: 140 * 30
+eraser: 150 * 150
+moving_h: 150 * 30
+moving_v: 150 * 30
+bounce: 130 * 30
+turret: 80 * 80
+normal: 100 * 30
+rotating: 160 * 25// 怪怪的

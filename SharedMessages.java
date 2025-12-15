@@ -62,13 +62,14 @@ class RandomPlatformsMessage implements Serializable {
 // 物件資訊
 class GameObjectInfo implements Serializable {
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
     int id;
     int width;
     int height;
     String color;
     ObjectType type;
     boolean selected;  // 是否已被選擇
+    String imagePath;   // 預設平台圖片路徑（用於玩家放置後的實際顯示）
     
     // 特殊屬性
     double moveSpeed;   // 移動速度
@@ -77,13 +78,13 @@ class GameObjectInfo implements Serializable {
     
     // 舊版建構子（向下相容）
     public GameObjectInfo(int id, int width, int height, String color) {
-        this(id, width, height, color, ObjectType.NORMAL, 0, 0, 0);
+        this(id, width, height, color, ObjectType.NORMAL, 0, 0, 0, null);
     }
     
     // 完整建構子
     public GameObjectInfo(int id, int width, int height, String color, 
                          ObjectType type, double moveSpeed, double moveRange, 
-                         double fireRate) {
+                         double fireRate, String imagePath) {
         this.id = id;
         this.width = width;
         this.height = height;
@@ -93,6 +94,7 @@ class GameObjectInfo implements Serializable {
         this.moveSpeed = moveSpeed;
         this.moveRange = moveRange;
         this.fireRate = fireRate;
+        this.imagePath = imagePath;
     }
 }
 // 物件列表訊息
@@ -103,6 +105,19 @@ class ObjectListMessage implements Serializable {
     
     public ObjectListMessage(List<GameObjectInfo> objects) {
         this.objects = objects;
+    }
+}
+
+// 角色選擇訊息
+class CharacterSelectionMessage implements Serializable {
+    @Serial
+    private static final long serialVersionUID = 1L;
+    String playerId;
+    int characterIndex; // 1, 2, or 3
+    
+    public CharacterSelectionMessage(String playerId, int characterIndex) {
+        this.playerId = playerId;
+        this.characterIndex = characterIndex;
     }
 }
 
@@ -122,7 +137,7 @@ class SelectionMessage implements Serializable {
 // 平台放置資訊（包含旋轉角度）
 class PlatformPlacement implements Serializable {
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
     int id;
     double x;
     double y;
@@ -130,14 +145,20 @@ class PlatformPlacement implements Serializable {
     int height;
     String color;
     double rotation;  // 旋轉角度
+    String imagePath; // 自訂平台圖片路徑（可為 null）
     
-    // 相容舊版本的建構子（沒有 rotation）
+    // 相容舊版本的建構子（沒有 rotation 或圖片）
     public PlatformPlacement(int id, double x, double y, int width, int height, String color) {
-        this(id, x, y, width, height, color, 0.0);
+        this(id, x, y, width, height, color, 0.0, null);
     }
     
-    // 完整建構子（包含 rotation）
+    // 相容舊版本的建構子（有 rotation，沒有圖片）
     public PlatformPlacement(int id, double x, double y, int width, int height, String color, double rotation) {
+        this(id, x, y, width, height, color, rotation, null);
+    }
+    
+    // 完整建構子（包含 rotation 與圖片路徑）
+    public PlatformPlacement(int id, double x, double y, int width, int height, String color, double rotation, String imagePath) {
         this.id = id;
         this.x = x;
         this.y = y;
@@ -145,6 +166,7 @@ class PlatformPlacement implements Serializable {
         this.height = height;
         this.color = color;
         this.rotation = rotation;
+        this.imagePath = imagePath;
     }
 }
 

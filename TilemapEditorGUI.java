@@ -111,7 +111,7 @@ public class TilemapEditorGUI extends Application {
         redrawMap();
         redrawTileset();
         
-        Scene scene = new Scene(root, 1920, 1000);
+        Scene scene = new Scene(root, 1400, 800);
         primaryStage.setTitle("瓷磚地圖編輯器 - 像 Unity Tilemap 一樣繪製");
         primaryStage.setScene(scene);
         primaryStage.show();
@@ -143,9 +143,9 @@ public class TilemapEditorGUI extends Application {
     }
     
     private VBox createLeftPanel() {
-        VBox panel = new VBox(10);
-        panel.setPadding(new Insets(10));
-        panel.setPrefWidth(300);
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(8));
+        panel.setPrefWidth(220);
         panel.setStyle("-fx-background-color: #2b2b2b;");
         
         Label title = new Label("瓷磚集合 (Tileset)");
@@ -179,7 +179,7 @@ public class TilemapEditorGUI extends Application {
         tilesetInfoLabel.setStyle("-fx-text-fill: #aaa; -fx-font-size: 11px;");
         
         tilesetScrollPane = new ScrollPane();
-        tilesetCanvas = new Canvas(280, 400);
+        tilesetCanvas = new Canvas(200, 300);
         tilesetGc = tilesetCanvas.getGraphicsContext2D();
         tilesetCanvas.setStyle("-fx-background-color: #1e1e1e;");
         tilesetCanvas.setOnMousePressed(this::handleTilesetMousePressed);
@@ -229,9 +229,9 @@ public class TilemapEditorGUI extends Application {
     }
     
     private VBox createToolPanel() {
-        VBox panel = new VBox(10);
-        panel.setPadding(new Insets(15));
-        panel.setPrefWidth(250);
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(8));
+        panel.setPrefWidth(200);
         panel.setStyle("-fx-background-color: #3c3c3c;");
         
         Label title = new Label("工具");

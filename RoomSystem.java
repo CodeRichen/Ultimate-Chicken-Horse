@@ -33,6 +33,8 @@ class RoomInfo implements Serializable {
     int totalRounds;
     Map<String, Boolean> readyStatus;
     RoomType roomType;
+    // 依加入順序給玩家編號（Player 1, Player 2 ...）
+    Map<String, Integer> playerOrder;
     
     public RoomInfo(String roomCode, String hostId, int maxPlayers, RoomType roomType) {
         this.roomCode = roomCode;
@@ -46,6 +48,8 @@ class RoomInfo implements Serializable {
         this.readyStatus = new HashMap<>();
         this.readyStatus.put(hostId, false);
         this.roomType = roomType;
+        this.playerOrder = new HashMap<>();
+        this.playerOrder.put(hostId, 1); // 房主為 Player 1
     }
 }
 

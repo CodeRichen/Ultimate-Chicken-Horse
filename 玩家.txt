@@ -1,0 +1,7 @@
+state:
+idle
+run
+jump
+death
+more action:
+flip
