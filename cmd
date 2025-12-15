@@ -8,6 +8,10 @@ java --module-path "D:\Tools\javafx-sdk-17.0.17\lib" --add-modules javafx.contro
  javac --module-path "D:\Tools\javafx-sdk-17.0.17\lib" -cp ".;fxgl-21.1-uber.jar" --add-modules javafx.controls,javafx.fxml *.java   
  java --module-path "D:\Tools\javafx-sdk-17.0.17\lib" -cp ".;fxgl-21.1-uber.jar" --add-modules javafx.controls,javafx.fxml GameClient
 
+or
+
+javac --module-path "D:\Tools\javafx-sdk-17.0.17\lib" --add-modules javafx.controls,javafx.fxml,javafx.graphics -cp "fxgl-17.3-uber.jar" *.java
+
 又或者
 # 清除舊產物
 Remove-Item *.class -ErrorAction SilentlyContinue

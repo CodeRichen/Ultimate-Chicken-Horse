@@ -897,16 +897,17 @@ class Room {
     
     // 加載並發送地圖配置
     public void sendMapConfig() {
+        List<PlatformPlacement> allMapPlacements = new ArrayList<>();
+        
+        // 1. 嘗試載入舊版地圖 (MapConfig)
         try {
             MapConfig mapConfig = new MapConfig();
             mapConfig.load();
             List<MapPlatform> platforms = mapConfig.getPlatforms();
             
             if (!platforms.isEmpty()) {
-                // 轉換為 PlatformPlacement 列表
-                List<PlatformPlacement> mapPlacements = new ArrayList<>();
                 for (MapPlatform mp : platforms) {
-                    mapPlacements.add(new PlatformPlacement(
+                    allMapPlacements.add(new PlatformPlacement(
                         -1,
                         mp.x,
                         mp.y,
@@ -917,21 +918,95 @@ class Room {
                         mp.imagePath
                     ));
                 }
-                
-                // 發送給房間內所有玩家
-                RandomPlatformsMessage mapMsg = new RandomPlatformsMessage(mapPlacements);
-                for (String pid : info.playerIds) {
-                    GameServer.ClientHandler handler = GameServer.getClientHandler(pid);
-                    if (handler != null) {
-                        handler.sendObject(mapMsg);
-                    }
-                }
-                System.out.println("[ROOM] Sent map config with " + platforms.size() + " platforms");
-            } else {
-                System.out.println("[ROOM] No map config found, using empty map");
+                System.out.println("[ROOM] Loaded " + platforms.size() + " platforms from MapConfig");
             }
         } catch (Exception e) {
-            System.out.println("[ROOM] Failed to load map config: " + e.getMessage());
+            System.out.println("[ROOM] No MapConfig found: " + e.getMessage());
+        }
+        
+        // 2. 嘗試載入瓷磚地圖 (TilemapConfig)
+        try {
+            TilemapConfig tilemapConfig = new TilemapConfig(80, 18);  // 80x18 瓷磚
+            tilemapConfig.load();
+            String tilesetPath = tilemapConfig.getTilesetImagePath();
+            int tileWidth = tilemapConfig.getTileWidth();
+            int tileHeight = tilemapConfig.getTileHeight();
+            int tilesetColumns = tilemapConfig.getTilesetColumns();
+            
+            if (tilesetPath != null && !tilesetPath.isEmpty()) {
+                System.out.println("[ROOM] Loading tilemap with tileset: " + tilesetPath);
+                System.out.println("[ROOM] Tile size: " + tileWidth + "x" + tileHeight + ", columns: " + tilesetColumns);
+                
+                // 轉換為相對路徑，以便客戶端可以找到
+                // 如果路徑包含 "map picture"，提取相對部分
+                String relativePath = tilesetPath;
+                if (tilesetPath.contains("map picture")) {
+                    int idx = tilesetPath.indexOf("map picture");
+                    relativePath = tilesetPath.substring(idx);
+                    System.out.println("[ROOM] Converted to relative path: " + relativePath);
+                } else {
+                    // 嘗試只使用文件名，假設在 map picture 目錄下
+                    File f = new File(tilesetPath);
+                    relativePath = "map picture/" + f.getName();
+                    System.out.println("[ROOM] Using filename in map picture: " + relativePath);
+                }
+                
+                int tilemapPlatformCount = 0;
+                // 遍歷所有瓷磚位置
+                for (int tileY = 0; tileY < 18; tileY++) {
+                    for (int tileX = 0; tileX < 80; tileX++) {
+                        int tileIndex = tilemapConfig.getTile(tileX, tileY);
+                        if (tileIndex >= 0) {
+                            // 計算瓷磚在遊戲世界中的位置
+                            double worldX = tileX * 60.0;  // 每個瓷磚在遊戲中是 60 像素
+                            double worldY = tileY * 60.0;
+                            
+                            // 計算瓷磚在圖片中的位置
+                            int srcRow = tileIndex / tilesetColumns;
+                            int srcCol = tileIndex % tilesetColumns;
+                            
+                            // 創建一個特殊的 imagePath 包含源矩形資訊
+                            // 格式: "imagePath|srcX,srcY,srcWidth,srcHeight"
+                            // 使用相對路徑
+                            String imageInfo = relativePath + "|" + 
+                                             (srcCol * tileWidth) + "," + 
+                                             (srcRow * tileHeight) + "," + 
+                                             tileWidth + "," + tileHeight;
+                            
+                            allMapPlacements.add(new PlatformPlacement(
+                                -1,
+                                worldX,
+                                worldY,
+                                60,  // 遊戲中的尺寸
+                                60,
+                                "#AAAAAA",  // 預設顏色
+                                0.0,
+                                imageInfo
+                            ));
+                            tilemapPlatformCount++;
+                        }
+                    }
+                }
+                System.out.println("[ROOM] Loaded " + tilemapPlatformCount + " tiles from TilemapConfig");
+            } else {
+                System.out.println("[ROOM] No tileset image path found in TilemapConfig");
+            }
+        } catch (Exception e) {
+            System.out.println("[ROOM] No TilemapConfig found or error loading: " + e.getMessage());
+        }
+        
+        // 3. 發送所有平台
+        if (!allMapPlacements.isEmpty()) {
+            RandomPlatformsMessage mapMsg = new RandomPlatformsMessage(allMapPlacements);
+            for (String pid : info.playerIds) {
+                GameServer.ClientHandler handler = GameServer.getClientHandler(pid);
+                if (handler != null) {
+                    handler.sendObject(mapMsg);
+                }
+            }
+            System.out.println("[ROOM] Sent total " + allMapPlacements.size() + " platforms to all players");
+        } else {
+            System.out.println("[ROOM] No map config found, using empty map");
         }
     }
     

@@ -2305,15 +2305,63 @@ private void handlePhaseChange(GamePhase newPhase) {
     // 建立平台的視圖：若有自訂圖片則使用圖片，否則使用顏色矩形
     private Node buildPlatformView(PlatformPlacement p, Color fallbackColor) {
         if (p.imagePath != null && !p.imagePath.isBlank()) {
-            Image img = loadPlatformImage(p.imagePath);
-            if (img != null) {
-                ImageView iv = new ImageView(img);
-                iv.setFitWidth(p.width);
-                iv.setFitHeight(p.height);
-                iv.setPreserveRatio(false);
-                return iv;
+            // 檢查是否為瓷磚格式: "imagePath|srcX,srcY,srcWidth,srcHeight"
+            if (p.imagePath.contains("|")) {
+                String[] parts = p.imagePath.split("\\|");
+                if (parts.length == 2) {
+                    String actualPath = parts[0];
+                    String[] coords = parts[1].split(",");
+                    if (coords.length == 4) {
+                        try {
+                            int srcX = Integer.parseInt(coords[0]);
+                            int srcY = Integer.parseInt(coords[1]);
+                            int srcWidth = Integer.parseInt(coords[2]);
+                            int srcHeight = Integer.parseInt(coords[3]);
+                            
+                            System.out.println("[CLIENT] Loading tile from: " + actualPath + 
+                                             " at (" + srcX + "," + srcY + ") size " + srcWidth + "x" + srcHeight);
+                            
+                            Image img = loadPlatformImage(actualPath);
+                            if (img != null) {
+                                System.out.println("[CLIENT] Image loaded successfully, size: " + 
+                                                 img.getWidth() + "x" + img.getHeight());
+                                // 使用 WritableImage 從源圖片裁剪瓷磚
+                                javafx.scene.image.PixelReader pixelReader = img.getPixelReader();
+                                javafx.scene.image.WritableImage tileImage = new javafx.scene.image.WritableImage(
+                                    pixelReader, srcX, srcY, srcWidth, srcHeight);
+                                
+                                ImageView iv = new ImageView(tileImage);
+                                iv.setFitWidth(p.width);
+                                iv.setFitHeight(p.height);
+                                iv.setPreserveRatio(false);
+                                System.out.println("[CLIENT] Tile view created successfully");
+                                return iv;
+                            } else {
+                                System.out.println("[CLIENT] Failed to load image: " + actualPath);
+                            }
+                        } catch (Exception e) {
+                            System.out.println("[CLIENT] Failed to create tile view: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                    } else {
+                        System.out.println("[CLIENT] Invalid coord format, expected 4 parts but got: " + coords.length);
+                    }
+                } else {
+                    System.out.println("[CLIENT] Invalid imagePath format, expected 2 parts but got: " + parts.length);
+                }
+            } else {
+                // 普通圖片路徑
+                Image img = loadPlatformImage(p.imagePath);
+                if (img != null) {
+                    ImageView iv = new ImageView(img);
+                    iv.setFitWidth(p.width);
+                    iv.setFitHeight(p.height);
+                    iv.setPreserveRatio(false);
+                    return iv;
+                }
             }
         }
+        System.out.println("[CLIENT] Using fallback color for platform at (" + p.x + "," + p.y + ")");
         return new Rectangle(p.width, p.height, fallbackColor);
     }
 

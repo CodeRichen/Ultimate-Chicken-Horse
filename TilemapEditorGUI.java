@@ -81,12 +81,35 @@ public class TilemapEditorGUI extends Application {
     public void start(Stage primaryStage) {
         tilemapConfig = new TilemapConfig(TILES_WIDTH, TILES_HEIGHT);
         
+        boolean mapLoaded = false;
+        
         // 嘗試載入現有地圖
         try {
             tilemapConfig.load();
             System.out.println("已載入現有地圖配置");
+            mapLoaded = true;
+            
+            // 恢復瓷磚集圖片
+            String tilesetPath = tilemapConfig.getTilesetImagePath();
+            if (tilesetPath != null && !tilesetPath.isEmpty()) {
+                File tilesetFile = new File(tilesetPath);
+                if (tilesetFile.exists()) {
+                    tilesetImage = new Image(tilesetFile.toURI().toString());
+                    tilesetTileWidth = tilemapConfig.getTileWidth();
+                    tilesetTileHeight = tilemapConfig.getTileHeight();
+                    tilesetColumns = tilemapConfig.getTilesetColumns();
+                    System.out.println("已載入瓷磚集: " + tilesetPath);
+                } else {
+                    System.out.println("瓷磚集圖片不存在: " + tilesetPath);
+                }
+            }
         } catch (Exception e) {
-            System.out.println("沒有找到現有地圖，從空白開始");
+            System.out.println("沒有找到現有地圖，創建預設地圖");
+        }
+        
+        // 如果沒有載入地圖，創建預設地圖
+        if (!mapLoaded) {
+            createDefaultMap();
         }
         
         BorderPane root = new BorderPane();
@@ -352,6 +375,14 @@ public class TilemapEditorGUI extends Application {
                 tilesetColumns = (int)(tilesetImage.getWidth() / tilesetTileWidth);
                 if (tilesetColumns <= 0) tilesetColumns = 1;
                 
+                // 保存瓷磚集資訊到配置
+                tilemapConfig.setTilesetInfo(
+                    file.getAbsolutePath(),
+                    tilesetTileWidth,
+                    tilesetTileHeight,
+                    tilesetColumns
+                );
+                
                 tilesetInfoLabel.setText("""
                     寬: %.0f px | 高: %.0f px
                     瓷磚數: %d x %d = %d"""
@@ -616,6 +647,30 @@ public class TilemapEditorGUI extends Application {
     private void loadMap() {
         try {
             tilemapConfig.load();
+            
+            // 恢復瓷磚集圖片
+            String tilesetPath = tilemapConfig.getTilesetImagePath();
+            if (tilesetPath != null && !tilesetPath.isEmpty()) {
+                File tilesetFile = new File(tilesetPath);
+                if (tilesetFile.exists()) {
+                    tilesetImage = new Image(tilesetFile.toURI().toString());
+                    tilesetTileWidth = tilemapConfig.getTileWidth();
+                    tilesetTileHeight = tilemapConfig.getTileHeight();
+                    tilesetColumns = tilemapConfig.getTilesetColumns();
+                    
+                    tilesetInfoLabel.setText("""
+                        寬: %.0f px | 高: %.0f px
+                        瓷磚數: %d x %d = %d"""
+                        .formatted(tilesetImage.getWidth(), tilesetImage.getHeight(),
+                                  tilesetColumns, 
+                                  (int)(tilesetImage.getHeight() / tilesetTileHeight),
+                                  tilesetColumns * (int)(tilesetImage.getHeight() / tilesetTileHeight)));
+                    redrawTileset();
+                } else {
+                    System.out.println("[TILEMAP] 瓷磚集圖片不存在: " + tilesetPath);
+                }
+            }
+            
             redrawMap();
             statusLabel.setText("✓ 已載入地圖");
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
@@ -642,6 +697,110 @@ public class TilemapEditorGUI extends Application {
             redrawMap();
             statusLabel.setText("✓ 地圖已清空");
         }
+    }
+    
+    /**
+     * 創建預設地圖 - 在編輯器啟動時如果沒有現有地圖則顯示
+     */
+    private void createDefaultMap() {
+        System.out.println("創建預設地圖...");
+        
+        // 嘗試載入預設的瓷磚集圖片（如果存在）
+        File defaultTileset = new File("map picture/normal.png");
+        if (defaultTileset.exists()) {
+            try {
+                tilesetImage = new Image(defaultTileset.toURI().toString());
+                
+                // 根據圖片實際大小自動計算瓷磚尺寸
+                // 如果圖片很小，就使用整張圖作為一個瓷磚
+                double imgWidth = tilesetImage.getWidth();
+                double imgHeight = tilesetImage.getHeight();
+                
+                if (imgWidth <= 100 && imgHeight <= 100) {
+                    // 小圖片，使用整張圖作為一個瓷磚
+                    tilesetTileWidth = (int)imgWidth;
+                    tilesetTileHeight = (int)imgHeight;
+                    tilesetColumns = 1;
+                } else {
+                    // 大圖片，假設是 60x60 的瓷磚集
+                    tilesetTileWidth = 60;
+                    tilesetTileHeight = 60;
+                    tilesetColumns = (int)(imgWidth / tilesetTileWidth);
+                    if (tilesetColumns <= 0) tilesetColumns = 1;
+                }
+                
+                System.out.println("瓷磚集尺寸: " + imgWidth + "x" + imgHeight + 
+                                 ", 瓷磚大小: " + tilesetTileWidth + "x" + tilesetTileHeight + 
+                                 ", 列數: " + tilesetColumns);
+                
+                tilemapConfig.setTilesetInfo(
+                    defaultTileset.getAbsolutePath(),
+                    tilesetTileWidth,
+                    tilesetTileHeight,
+                    tilesetColumns
+                );
+                
+                if (tilesetInfoLabel != null) {
+                    tilesetInfoLabel.setText("""
+                        寬: %.0f px | 高: %.0f px
+                        瓷磚數: %d x %d = %d"""
+                        .formatted(tilesetImage.getWidth(), tilesetImage.getHeight(),
+                                  tilesetColumns, 
+                                  (int)(tilesetImage.getHeight() / tilesetTileHeight),
+                                  tilesetColumns * (int)(tilesetImage.getHeight() / tilesetTileHeight)));
+                }
+                
+                currentSelectedTile = 0;
+                selectedTileIndices.clear();
+                selectedTileIndices.add(0);
+                
+                System.out.println("已載入預設瓷磚集: " + defaultTileset.getAbsolutePath());
+            } catch (Exception e) {
+                System.out.println("無法載入預設瓷磚集: " + e.getMessage());
+            }
+        }
+        
+        // 創建一個簡單的預設地圖佈局
+        // 底部平台 (y = 17，最底層)
+        for (int x = 0; x < TILES_WIDTH; x++) {
+            tilemapConfig.setTile(x, 17, 0);  // 使用瓷磚索引 0
+        }
+        
+        // 起始平台 (左側)
+        for (int y = 14; y <= 16; y++) {
+            for (int x = 0; x <= 5; x++) {
+                tilemapConfig.setTile(x, y, 0);
+            }
+        }
+        
+        // 終點平台 (右側)
+        for (int y = 14; y <= 16; y++) {
+            for (int x = 74; x < TILES_WIDTH; x++) {
+                tilemapConfig.setTile(x, y, 0);
+            }
+        }
+        
+        // 中間的一些平台作為示例
+        // 左側階梯
+        for (int i = 0; i < 3; i++) {
+            for (int x = 10 + i * 3; x < 13 + i * 3; x++) {
+                tilemapConfig.setTile(x, 15 - i, 0);
+            }
+        }
+        
+        // 中間平台
+        for (int x = 30; x < 50; x++) {
+            tilemapConfig.setTile(x, 10, 0);
+        }
+        
+        // 右側階梯
+        for (int i = 0; i < 3; i++) {
+            for (int x = 62 - i * 3; x < 65 - i * 3; x++) {
+                tilemapConfig.setTile(x, 15 - i, 0);
+            }
+        }
+        
+        System.out.println("預設地圖創建完成");
     }
     
     public static void main(String[] args) {

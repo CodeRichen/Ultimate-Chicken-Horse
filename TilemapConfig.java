@@ -11,11 +11,15 @@ import java.io.Serializable;
  */
 public class TilemapConfig implements Serializable {
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;  // 版本更新
     
     private final int width;
     private final int height;
     private int[][] tileMap;
+    private String tilesetImagePath;  // 瓷磚集圖片路徑
+    private int tileWidth = 32;       // 每個瓷磚的寬度
+    private int tileHeight = 32;      // 每個瓷磚的高度
+    private int tilesetColumns = 0;   // 瓷磚集的列數
     private static final String TILEMAP_FILE = "tilemap_config.dat";
     
     public TilemapConfig(int width, int height) {
@@ -90,12 +94,16 @@ public class TilemapConfig implements Serializable {
         try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(TILEMAP_FILE))) {
             oos.writeInt(width);
             oos.writeInt(height);
+            oos.writeUTF(tilesetImagePath != null ? tilesetImagePath : "");
+            oos.writeInt(tileWidth);
+            oos.writeInt(tileHeight);
+            oos.writeInt(tilesetColumns);
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
                     oos.writeInt(tileMap[y][x]);
                 }
             }
-            System.out.println("瓷磚地圖已儲存到: " + TILEMAP_FILE);
+            System.out.println("瓷磚地圖已儲存到: " + TILEMAP_FILE + " (瓷磚集: " + tilesetImagePath + ")");
         }
     }
     
@@ -112,12 +120,20 @@ public class TilemapConfig implements Serializable {
                                     " (預期: " + width + "x" + height + ")");
             }
             
+            tilesetImagePath = ois.readUTF();
+            if (tilesetImagePath.isEmpty()) {
+                tilesetImagePath = null;
+            }
+            tileWidth = ois.readInt();
+            tileHeight = ois.readInt();
+            tilesetColumns = ois.readInt();
+            
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
                     tileMap[y][x] = ois.readInt();
                 }
             }
-            System.out.println("瓷磚地圖已從 " + TILEMAP_FILE + " 加載");
+            System.out.println("瓷磚地圖已從 " + TILEMAP_FILE + " 加載 (瓷磚集: " + tilesetImagePath + ")");
         }
     }
     
@@ -133,6 +149,44 @@ public class TilemapConfig implements Serializable {
      */
     public int getHeight() {
         return height;
+    }
+    
+    /**
+     * 設置瓷磚集資訊
+     */
+    public void setTilesetInfo(String imagePath, int tileWidth, int tileHeight, int columns) {
+        this.tilesetImagePath = imagePath;
+        this.tileWidth = tileWidth;
+        this.tileHeight = tileHeight;
+        this.tilesetColumns = columns;
+    }
+    
+    /**
+     * 獲取瓷磚集圖片路徑
+     */
+    public String getTilesetImagePath() {
+        return tilesetImagePath;
+    }
+    
+    /**
+     * 獲取瓷磚寬度
+     */
+    public int getTileWidth() {
+        return tileWidth;
+    }
+    
+    /**
+     * 獲取瓷磚高度
+     */
+    public int getTileHeight() {
+        return tileHeight;
+    }
+    
+    /**
+     * 獲取瓷磚集列數
+     */
+    public int getTilesetColumns() {
+        return tilesetColumns;
     }
     
     /**
