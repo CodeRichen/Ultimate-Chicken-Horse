@@ -3023,10 +3023,9 @@ private void handlePhaseChange(GamePhase newPhase) {
         if (deathRecoveryTimer > 0) {
             deathRecoveryTimer -= tpf;
             if (deathRecoveryTimer <= 0) {
-                // 恢復正常外觀,但不重置hasFailed(本回合已失敗)
-                player.setScaleY(1.0);
+                // 恢復計時器結束（玩家保持在death動畫最後一幀）
                 deathRecoveryTimer = 0;
-                System.out.println("[CLIENT] Player recovered from death (visual only, still failed this round)!");
+                System.out.println("[CLIENT] Player death animation complete (still failed this round)!");
             }
         }
         
@@ -3067,8 +3066,13 @@ private void handlePhaseChange(GamePhase newPhase) {
                         out.reset();
                     }
                     hasFailed = true;
-                    // 玩家變扁,並開始恢復計時
-                    player.setScaleY(0.2);
+                    // 播放死亡動畫
+                    PlayerAnimationComponent animComp = player.getComponent(PlayerAnimationComponent.class);
+                    if (animComp != null) {
+                        animComp.setState("death");
+                        System.out.println("[CLIENT] Death animation triggered!");
+                    }
+                    // 開始恢復計時（不壓扁玩家）
                     deathRecoveryTimer = 2.0;  // 2秒後恢復
                     // 禁用玩家移動,但允許觀戰
                     player.getComponent(PlayerControl.class).setEnabled(false);
@@ -3534,8 +3538,13 @@ public void onUpdate(double tpf) {
             facingDirection = direction;
             // 只改變 ImageView 的 scaleX，不改變整個 entity
             // 這樣 nameText 就不會受到影響
-            if (imageView != null) {
-                imageView.setScaleX(direction);
+            // 每次都從 animationComponent 獲取最新的 imageView
+            ImageView currentImageView = (animComponent != null) ? animComponent.getImageView() : imageView;
+            if (currentImageView != null) {
+                currentImageView.setScaleX(direction);
+                System.out.println("[PLAYER CONTROL] Set facing to " + (direction == 1 ? "RIGHT" : "LEFT") + ", scaleX=" + currentImageView.getScaleX());
+            } else {
+                System.err.println("[PLAYER CONTROL] Cannot set facing: imageView is null!");
             }
         }
     }
@@ -3785,6 +3794,7 @@ class PlayerAnimationComponent extends Component {
     private List<Image> walkFrames = new ArrayList<>();
     private List<Image> jumpFrames = new ArrayList<>();
     private List<Image> fallFrames = new ArrayList<>();
+    private List<Image> deathFrames = new ArrayList<>();
     private int currentFrame = 0;
     private double frameTimer = 0;
     // 調整幀間隔：將 idle 動畫改為更慢的速度，避免太快看不清
@@ -3793,6 +3803,7 @@ class PlayerAnimationComponent extends Component {
     private double walkFrameInterval = 0.12;  // 稍快一點的行走幀率
     private double jumpFrameInterval = 0.20;  // jump 幀速率
     private double fallFrameInterval = 0.20;  // fall 幀速率
+    private double deathFrameInterval = 0.15;  // death 幀速率（稍快以顯示死亡動畫）
     // idle 動畫只循環 1~8，跳過第 0 幀（空白的 player1.png）
     private ImageView imageView;
     
@@ -3835,12 +3846,14 @@ class PlayerAnimationComponent extends Component {
             imageView.setPreserveRatio(true);
             imageView.setTranslateX(-64);
             imageView.setTranslateY(-64);
-            System.out.println("[ANIMATION] ImageView initialized: " + imageView.getFitWidth() + "x" + imageView.getFitHeight());
+            imageView.setScaleX(1);  // 初始面向右邊
+            System.out.println("[ANIMATION] ImageView initialized: " + imageView.getFitWidth() + "x" + imageView.getFitHeight() + ", facing RIGHT (scaleX=1)");
             
             loadIdleAnimation();
             loadWalkAnimation();
             loadJumpAnimation();
             loadFallAnimation();
+            loadDeathAnimation();
         } else {
             System.err.println("[ANIMATION] ImageView is still NULL after onAdded!");
         }
@@ -3917,10 +3930,11 @@ class PlayerAnimationComponent extends Component {
                 double h = img.getHeight();
                 System.out.println("[ANIMATION] Jump image dimensions: " + w + "x" + h);
                 
+                // 先加入，即使尺寸為 0（之後會在使用時處理）
+                jumpFrames.add(img);
                 if (w == 0 || h == 0) {
-                    System.err.println("[ANIMATION] Jump image has zero dimensions!");
+                    System.err.println("[ANIMATION] Warning: Jump image has zero dimensions but added to list!");
                 } else {
-                    jumpFrames.add(img);
                     System.out.println("[ANIMATION] Loaded jump frame successfully!");
                 }
             }
@@ -3949,10 +3963,11 @@ class PlayerAnimationComponent extends Component {
                 double h = img.getHeight();
                 System.out.println("[ANIMATION] Fall image dimensions: " + w + "x" + h);
                 
+                // 先加入，即使尺寸為 0（之後會在使用時處理）
+                fallFrames.add(img);
                 if (w == 0 || h == 0) {
-                    System.err.println("[ANIMATION] Fall image has zero dimensions!");
+                    System.err.println("[ANIMATION] Warning: Fall image has zero dimensions but added to list!");
                 } else {
-                    fallFrames.add(img);
                     System.out.println("[ANIMATION] Loaded fall frame successfully!");
                 }
             }
@@ -3961,6 +3976,38 @@ class PlayerAnimationComponent extends Component {
             e.printStackTrace();
         }
         System.out.println("[ANIMATION] Total fall frames loaded: " + fallFrames.size());
+    }
+    
+    private void loadDeathAnimation() {
+        deathFrames.clear();
+        // death 幀：player22-26（5幀）
+        for (int i = 22; i <= 26; i++) {
+            String path = "file:map picture/player" + characterIndex + "/death/player" + i + ".png";
+            System.out.println("[ANIMATION] Attempting to load death frame " + i + " from: " + path);
+            try {
+                Image img = new Image(path, false);  // 使用同步載入
+                
+                if (img.isError()) {
+                    System.err.println("[ANIMATION] Death image " + i + " loading error: " + img.getException());
+                    img.getException().printStackTrace();
+                } else {
+                    double w = img.getWidth();
+                    double h = img.getHeight();
+                    System.out.println("[ANIMATION] Death frame " + i + " dimensions: " + w + "x" + h);
+                    
+                    if (w == 0 || h == 0) {
+                        System.err.println("[ANIMATION] Death frame " + i + " has zero dimensions!");
+                    } else {
+                        deathFrames.add(img);
+                        System.out.println("[ANIMATION] Loaded death frame " + i + " successfully!");
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[ANIMATION] Exception loading death frame " + i + ": " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        System.out.println("[ANIMATION] Total death frames loaded: " + deathFrames.size());
     }
     
     @Override
@@ -3988,7 +4035,20 @@ class PlayerAnimationComponent extends Component {
 
         frameTimer -= interval;
         int loopStart = getLoopStartIndex(currentState, frames);
-        currentFrame = (currentFrame + 1) % frames.size();
+        
+        // death 狀態不循環，播放完停在最後一幀
+        if (currentState.equals("death")) {
+            if (currentFrame < frames.size() - 1) {
+                currentFrame++;
+            }
+            // 否則停在最後一幀，不再更新
+        } else if (currentState.equals("jump") || currentState.equals("fall")) {
+            // jump 和 fall 是單幀動畫，不需要循環更新
+            // 保持在當前幀即可
+        } else {
+            // idle 和 walk 狀態正常循環
+            currentFrame = (currentFrame + 1) % frames.size();
+        }
         
         // 若當前幀無圖片或尺寸為 0，跳到下一個非空幀
         Image currentImage = frames.get(currentFrame);
@@ -4018,6 +4078,17 @@ class PlayerAnimationComponent extends Component {
             this.currentState = newState;
             List<Image> frames = getFramesForState(newState);
             System.out.println("[ANIMATION] Frames available for " + newState + ": " + frames.size());
+            
+            // 特別檢查 jump 和 fall
+            if (newState.equals("jump") || newState.equals("fall")) {
+                System.out.println("[ANIMATION] " + newState + " frames list: " + frames);
+                if (!frames.isEmpty()) {
+                    System.out.println("[ANIMATION] First frame in " + newState + ": " + frames.get(0) + 
+                        ", width=" + (frames.get(0) != null ? frames.get(0).getWidth() : "null") +
+                        ", height=" + (frames.get(0) != null ? frames.get(0).getHeight() : "null"));
+                }
+            }
+            
             this.currentFrame = getLoopStartIndex(newState, frames);
             this.frameTimer = 0;
             if (!frames.isEmpty() && imageView != null) {
@@ -4031,7 +4102,7 @@ class PlayerAnimationComponent extends Component {
                     imageView.setPreserveRatio(true);
                     imageView.setTranslateX(-64);
                     imageView.setTranslateY(-64);
-                    System.out.println("[ANIMATION] Successfully changed to " + newState + " (frame " + currentFrame + ", size: " + img.getWidth() + "x" + img.getHeight() + ")");
+                    System.out.println("[ANIMATION] Successfully changed to " + newState + " (frame " + currentFrame + "/" + frames.size() + ", size: " + img.getWidth() + "x" + img.getHeight() + ")");
                 } else {
                     System.err.println("[ANIMATION] Frame " + currentFrame + " in state " + newState + " is null or empty (img=" + img + ")");
                 }
@@ -4058,6 +4129,7 @@ class PlayerAnimationComponent extends Component {
         loadWalkAnimation();
         loadJumpAnimation();
         loadFallAnimation();
+        loadDeathAnimation();
         // 立即更新為第一幀以避免閃爍
         if (imageView != null && !idleFrames.isEmpty()) {
             imageView.setImage(idleFrames.get(1));  // 從第 1 幀開始
@@ -4067,7 +4139,7 @@ class PlayerAnimationComponent extends Component {
             imageView.setTranslateX(-64);
             imageView.setTranslateY(-64);
         }
-        System.out.println("[ANIMATION] Character index changed to " + index + ", reloaded idle frames: " + idleFrames.size());
+        System.out.println("[ANIMATION] Character index changed to " + index + ", reloaded all animations including death");
     }
 
     // 當玩家視圖被替換（例如換角色）時，重新從 Entity 取出新的 ImageView
@@ -4108,6 +4180,7 @@ class PlayerAnimationComponent extends Component {
             case "walk" -> walkFrames;  // walk 只用 walkFrames，不退回到 idle
             case "jump" -> jumpFrames;
             case "fall" -> fallFrames;
+            case "death" -> deathFrames;
             case "idle" -> idleFrames;
             default -> idleFrames;  // 其他狀態暫時共用 idle
         };
@@ -4120,7 +4193,8 @@ class PlayerAnimationComponent extends Component {
             case "walk" -> 0;                  // walk 從 0 開始（player10 是首幀）
             case "jump" -> 0;                  // jump 從 0 開始（player20）
             case "fall" -> 0;                  // fall 從 0 開始（player21）
-            default -> fallback;  // death 等其他狀態使用第一個非空幀
+            case "death" -> 0;                 // death 從 0 開始（player22）
+            default -> fallback;  // 其他狀態使用第一個非空幀
         };
     }
 
@@ -4138,6 +4212,7 @@ class PlayerAnimationComponent extends Component {
         return switch (state) {
             case "walk" -> walkFrameInterval;
             case "jump" -> jumpFrameInterval;
+            case "death" -> deathFrameInterval;
             case "fall" -> fallFrameInterval;
             case "idle" -> frameInterval;
             default -> frameInterval;
