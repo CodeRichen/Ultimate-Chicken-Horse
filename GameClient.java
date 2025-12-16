@@ -40,6 +40,8 @@ public class GameClient extends GameApplication {
     private static int SERVER_PORT = 12345;
     
     private Entity player;
+    private javafx.scene.text.Text lastCreatedNameText = null;  // 用於傳遞 nameText 給 PlayerControl
+    private javafx.scene.Node lastCreatedBodyNode = null;  // 用於傳遞 bodyNode 給 PlayerControl
     private List<Entity> platformEntities = new ArrayList<>();
     private Map<String, Entity> otherPlayers = new HashMap<>();
     private Entity middlePlatform;
@@ -139,7 +141,7 @@ public class GameClient extends GameApplication {
     // 載入角色圖片
     private javafx.scene.image.Image loadCharacterImage(int index) {
         try {
-            return new javafx.scene.image.Image("file:map picture/test player" + index + ".png");
+            return new javafx.scene.image.Image("file:map picture/player" + index + ".png");
         } catch (Exception e) {
             System.err.println("[CLIENT] Failed to load character " + index + ": " + e.getMessage());
             return null;
@@ -235,6 +237,14 @@ public class GameClient extends GameApplication {
             player.getViewComponent().clearChildren();
             player.getViewComponent().addChild(newView);
             System.out.println("[CLIENT] Updated player view with character " + index);
+
+            // 同步更新動畫組件的角色幀來源
+            PlayerAnimationComponent anim = player.getComponentOptional(PlayerAnimationComponent.class).orElse(null);
+            if (anim != null) {
+                anim.setCharacterIndex(index);
+                anim.refreshImageViewFromEntity();
+                player.setVisible(true); // 確保玩家可見
+            }
         }
         
         // 發送給伺服器
@@ -292,6 +302,9 @@ public class GameClient extends GameApplication {
         name.layoutBoundsProperty().addListener((obs, oldB, newB) -> {
             name.setTranslateX(-newB.getWidth() / 2.0);
         });
+        
+        lastCreatedNameText = name;  // 存儲 nameText 供稍後使用
+        lastCreatedBodyNode = body;  // 存儲 bodyNode 供稍後使用
 
         javafx.scene.Group group = new javafx.scene.Group(body, name);
         return group;
@@ -802,11 +815,25 @@ public class GameClient extends GameApplication {
         createFixedPlatforms();
         // createMiddlePlatform();  // 註解掉灰色中間平台
         String myLabel = getPlayerLabel(currentRoomInfo, myPlayerId != null ? myPlayerId : "Me");
+        
+        // 準備玩家 View
+        javafx.scene.Node playerView = buildPlayerView(myLabel, myColor, myPlayerId);
+        int charIndex = selectedCharacter;
+        
+        // 建立玩家動畫和控制組件
+        PlayerAnimationComponent animComp = new PlayerAnimationComponent(charIndex);
+        PlayerControl playerCtrl = new PlayerControl(platformEntities);
+        playerCtrl.setAnimationComponent(animComp);
+        playerCtrl.setNameText(lastCreatedNameText);  // 設置 nameText 參考以便翻轉時不翻轉名字
+        playerCtrl.setBodyNode(lastCreatedBodyNode);  // 設置 bodyNode 參考以便翻轉
+        
         player = FXGL.entityBuilder()
             .at(100, 900)
-            .view(buildPlayerView(myLabel, myColor, myPlayerId))
-            .with(new PlayerControl(platformEntities))
+            .view(playerView)
+            .with(animComp)
+            .with(playerCtrl)
             .buildAndAttach();
+        
         updatePlayerLabel(player, myLabel);
         player.setVisible(false);
         createGameZones();
@@ -1956,12 +1983,18 @@ private void handlePhaseChange(GamePhase newPhase) {
             Color playerColor = Color.web(info.colorHex);
             String label = getPlayerLabel(currentRoomInfo, info.playerId);
             javafx.scene.Node view = buildPlayerView(label, playerColor, info.playerId);
+            
+            int charIdx = playerCharacters.getOrDefault(info.playerId, 1);
+            PlayerAnimationComponent animComp = new PlayerAnimationComponent(charIdx);
             SmoothPlayerComponent smoothComponent = new SmoothPlayerComponent();
+            
             otherPlayer = FXGL.entityBuilder()
                     .at(info.x, info.y)
-                .view(view)
+                    .view(view)
+                    .with(animComp)
                     .with(smoothComponent)
                     .buildAndAttach();
+            
             updatePlayerLabel(otherPlayer, label);
             otherPlayers.put(info.playerId, otherPlayer);
             System.out.println("[CLIENT] Created other player: " + info.playerId);
@@ -2401,9 +2434,16 @@ private void handlePhaseChange(GamePhase newPhase) {
     protected void initInput() {
         FXGL.getInput().addAction(new UserAction("Move Left A") {
             @Override
+            protected void onActionBegin() {
+                if (player != null && currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+                    player.getComponent(PlayerControl.class).setLeftHeld(true);
+                }
+            }
+            @Override
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveLeft();
+                    player.getComponent(PlayerControl.class).setLeftHeld(true);
                 } else if (currentPhase == GamePhase.PLAYING && (hasFinished || hasFailed)) {
                     // 已完成/死亡的玩家可以移動攝影機觀戰
                     cameraOffsetX = Math.max(0, cameraOffsetX - 120);
@@ -2411,6 +2451,12 @@ private void handlePhaseChange(GamePhase newPhase) {
                 } else if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && myPlacement == null) {
                     cameraOffsetX = Math.max(0, cameraOffsetX - 120);
                     FXGL.getGameScene().getViewport().setX(cameraOffsetX);
+                }
+            }
+            @Override
+            protected void onActionEnd() {
+                if (player != null) {
+                    player.getComponent(PlayerControl.class).setLeftHeld(false);
                 }
             }
         }, KeyCode.A);
@@ -2441,18 +2487,37 @@ private void handlePhaseChange(GamePhase newPhase) {
 }, KeyCode.ENTER);
         FXGL.getInput().addAction(new UserAction("Move Left Arrow") {
             @Override
+            protected void onActionBegin() {
+                if (player != null && currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+                    player.getComponent(PlayerControl.class).setLeftHeld(true);
+                }
+            }
+            @Override
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveLeft();
+                }
+            }
+            @Override
+            protected void onActionEnd() {
+                if (player != null) {
+                    player.getComponent(PlayerControl.class).setLeftHeld(false);
                 }
             }
         }, KeyCode.LEFT);
 
         FXGL.getInput().addAction(new UserAction("Move Right D") {
             @Override
+            protected void onActionBegin() {
+                if (player != null && currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+                    player.getComponent(PlayerControl.class).setRightHeld(true);
+                }
+            }
+            @Override
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveRight();
+                    player.getComponent(PlayerControl.class).setRightHeld(true);
                 } else if (currentPhase == GamePhase.PLAYING && (hasFinished || hasFailed)) {
                     // 已完成/死亡的玩家可以移動攝影機觀戰
                     double maxOffset = Math.max(0, FINISH_X - SCREEN_WIDTH);
@@ -2464,13 +2529,31 @@ private void handlePhaseChange(GamePhase newPhase) {
                     FXGL.getGameScene().getViewport().setX(cameraOffsetX);
                 }
             }
+            @Override
+            protected void onActionEnd() {
+                if (player != null) {
+                    player.getComponent(PlayerControl.class).setRightHeld(false);
+                }
+            }
         }, KeyCode.D);
         
         FXGL.getInput().addAction(new UserAction("Move Right Arrow") {
             @Override
+            protected void onActionBegin() {
+                if (player != null && currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
+                    player.getComponent(PlayerControl.class).setRightHeld(true);
+                }
+            }
+            @Override
             protected void onAction() {
                 if (currentPhase == GamePhase.PLAYING && player.isVisible() && !hasFinished && !hasFailed) {
                     player.getComponent(PlayerControl.class).moveRight();
+                }
+            }
+            @Override
+            protected void onActionEnd() {
+                if (player != null) {
+                    player.getComponent(PlayerControl.class).setRightHeld(false);
                 }
             }
         }, KeyCode.RIGHT);
@@ -2956,19 +3039,19 @@ private void handlePhaseChange(GamePhase newPhase) {
             for (Entity zone : deathZones) {
                 if (!zone.isVisible()) continue;
                 
-                // 計算玩家底部和平台頂部的距離
-                double playerBottom = playerY + 25;  // 玩家半徑
+                // 使用矩形碰撞：玩家中心/半寬半高，平台寬高
+                double halfW = pc.getCurrentHalfWidth();
+                double halfH = pc.getCurrentHalfHeight();
+                double playerBottom = playerY + halfH;
                 double platformTop = zone.getY();
                 double platformLeft = zone.getX();
                 double platformRight = zone.getX() + (zone.hasComponent(DeathZoneComponent.class) ? 
                                                      zone.getComponent(DeathZoneComponent.class).width : 0);
                 
-                // 檢查玩家是否在平台上方範圍內,且底部接近平台頂部
-                boolean isOnTopOfPlatform = (playerX > platformLeft && playerX < platformRight &&
-                                            Math.abs(playerBottom - platformTop) < 5 &&
-                                            pc.velocityY >= 0);  // 向下移動或靜止
+                boolean horizontallyInside = (playerX + halfW > platformLeft && playerX - halfW < platformRight);
+                boolean touchingTop = Math.abs(playerBottom - platformTop) < 5 && pc.velocityY >= 0;
                 
-                if (isOnTopOfPlatform) {
+                if (horizontallyInside && touchingTop) {
                     isStandingOnDeathPlatform = true;
                     System.out.println("[CLIENT] Standing on death platform at (" + zone.getX() + "," + zone.getY() + ")!");
                     break;
@@ -3002,8 +3085,11 @@ private void handlePhaseChange(GamePhase newPhase) {
         double endX = endPlatform.getX();
         double endY = endPlatform.getY();
         
-        if (playerX >= endX && playerX <= endX + 200 &&
-            playerY >= endY - 50 && playerY <= endY + 30) {
+        // 只有當玩家在地面上且在終點平台的正上方時才觸發完成
+        PlayerControl playerControl = player.getComponent(PlayerControl.class);
+        if (playerControl.isOnGround() &&
+            playerX >= endX && playerX <= endX + 200 &&
+            playerY >= endY - 100 && playerY <= endY) {
             
             try {
                 long finishTime = System.currentTimeMillis() - gameStartTime;
@@ -3120,24 +3206,25 @@ class PlatformComponent extends Component {
     }
 
     /**
-     * 修復後的碰撞檢測 - 支持旋轉平台
+     * 碰撞檢測：玩家使用寬/高的一半 (半寬、半高)，平台為矩形。
      */
-    public CollisionInfo checkCollision(double playerX, double playerY, double radius, double velocityY) {
-        // 如果平台有旋轉，使用旋轉碰撞檢測
+    public CollisionInfo checkCollision(double playerX, double playerY, double halfW, double halfH, double velocityY) {
+        // 如果平台有旋轉，使用旋轉碰撞（仍以近似圓形 radius 處理）
         if (Math.abs(entity.getRotation()) > 0.1) {
+            double radius = Math.max(halfW, halfH);
             return checkRotatedCollision(playerX, playerY, radius, velocityY);
         }
         
-        // 無旋轉的平台使用原本的 AABB 碰撞檢測
+        // 無旋轉：AABB vs AABB
         double platformLeft = entity.getX();
         double platformRight = entity.getX() + width;
         double platformTop = entity.getY();
         double platformBottom = entity.getY() + height;
 
-        double playerLeft = playerX - radius;
-        double playerRight = playerX + radius;
-        double playerTop = playerY - radius;
-        double playerBottom = playerY + radius;
+        double playerLeft = playerX - halfW;
+        double playerRight = playerX + halfW;
+        double playerTop = playerY - halfH;
+        double playerBottom = playerY + halfH;
 
         boolean overlapping = !(playerRight < platformLeft || 
                                 playerLeft > platformRight || 
@@ -3182,30 +3269,21 @@ class PlatformComponent extends Component {
     double centerY = entity.getY() + height / 2.0;
     double angle = Math.toRadians(-angleDeg);
 
-    // 取玩家圓心
-    double dxWorld = playerX - centerX;
-    double dyWorld = playerY - centerY;
-
-    // 轉到矩形局部座標
-    double localX = dxWorld * Math.cos(angle) - dyWorld * Math.sin(angle);
-    double localY = dxWorld * Math.sin(angle) + dyWorld * Math.cos(angle);
-
+    // 取玩家圓心，轉換到平台局部坐標
+    double dx = playerX - centerX;
+    double dy = playerY - centerY;
+    double localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+    double localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+    
+    // 計算矩形半寬半高
     double halfW = width / 2.0;
     double halfH = height / 2.0;
-
-    // 找到矩形內最近點
-    double clampedX = Math.max(-halfW, Math.min(localX, halfW));
-    double clampedY = Math.max(-halfH, Math.min(localY, halfH));
-
-    double distX = localX - clampedX;
-    double distY = localY - clampedY;
-    double dist2 = distX * distX + distY * distY;
-
-    if (dist2 > radius * radius) {
+    
+    // 檢查玩家圓心是否在矩形內（考慮圓半徑）
+    if (Math.abs(localX) > halfW + radius || Math.abs(localY) > halfH + radius) {
         return new CollisionInfo(false, CollisionSide.NONE);
     }
-
-    // 計算穿透：若圓心在矩形內，用邊界重疊決定方向
+    
     double overlapX = halfW - Math.abs(localX);
     double overlapY = halfH - Math.abs(localY);
 
@@ -3237,9 +3315,18 @@ class PlayerControl extends Component {
     private boolean onGround = false;
     private boolean crouching = false;
     private List<Entity> platforms;
-    // 基礎半徑，實際碰撞半徑會依照縮放變化（蹲下時縮小）
-    private double playerRadius = 64;  // 玩家圖片為 128x128，所以碰撞半徑為 64
+    // 碰撞盒的一半尺寸（寬 40，高 112 -> 半寬 20，半高 56）
+    private double playerHalfWidth = 20;
+    private double playerHalfHeight = 56;
     private boolean enabled = true;  // 控制玩家是否可移動
+    private PlayerAnimationComponent animComponent = null;  // 動畫組件參考
+    private int facingDirection = 1;  // 1 = 右邊，-1 = 左邊，用於 flip 邏輯
+    private javafx.scene.text.Text nameText = null;  // 玩家名字文本參考，用於逆向翻轉
+    private javafx.scene.Node bodyNode = null;  // 身體節點（ImageView 或 Circle），用於翻轉
+    private javafx.scene.image.ImageView imageView = null;  // ImageView 引用，用於翻轉角色圖像
+    private boolean leftHeld = false;
+    private boolean rightHeld = false;
+    private double walkGraceTimer = 0.0;  // 短暫保持 walk 狀態的緩衝，避免切回 idle 閃爍
     
     private final double MAX_VELOCITY_Y = 700.0;  // 改為 pixels/second (增加至 700，配合更強的重力)
 
@@ -3261,12 +3348,22 @@ class PlayerControl extends Component {
         onGround = false;
         crouching = false;
         enabled = true;
+        facingDirection = 1;  // 重置為向右
+        
+        // 重置 ImageView 翻轉
+        if (imageView != null) {
+            imageView.setScaleX(1);  // 恢復正常
+        }
     }
 
-    private double getCurrentRadius() {
-        // 採用較大軸向的縮放，確保圓形碰撞體覆蓋視覺大小
+    public double getCurrentHalfWidth() {
         double scale = Math.max(entity.getTransformComponent().getScaleX(), entity.getTransformComponent().getScaleY());
-        return playerRadius * scale;
+        return playerHalfWidth * scale;
+    }
+
+    public double getCurrentHalfHeight() {
+        double scale = Math.max(entity.getTransformComponent().getScaleX(), entity.getTransformComponent().getScaleY());
+        return playerHalfHeight * scale;
     }
    @Override
 public void onUpdate(double tpf) {
@@ -3289,7 +3386,8 @@ public void onUpdate(double tpf) {
     if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
     
     // 先移動X
-    double radius = getCurrentRadius();
+    double halfW = getCurrentHalfWidth();
+    double halfH = getCurrentHalfHeight();
     double oldX = entity.getX();
     entity.setX(entity.getX() + velocityX * tpf);  // 乘以 tpf 使移動與時間相關
     
@@ -3299,7 +3397,7 @@ public void onUpdate(double tpf) {
         if (!platform.hasComponent(PlatformComponent.class)) continue;
         
         PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), radius, velocityY);
+        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
         
         if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
             entity.setX(oldX);  // 恢復到舊位置
@@ -3320,16 +3418,27 @@ public void onUpdate(double tpf) {
         if (!platform.hasComponent(PlatformComponent.class)) continue;
         
         PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), radius, velocityY);
+        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
         
         if (collision.collided) {
             switch (collision.side) {
                 case TOP:
-                    // 站立在平台上：讓玩家圖像底部剛好貼齊平台頂部
-                    entity.setY(platform.getY() - radius);
+                    // 站立在平台上：讓玩家圖像底部貼齊平台頂部（使用半高）
+                    entity.setY(platform.getY() - halfH);
                     
                     if (velocityY > 0) velocityY = 0;
                     onGround = true;
+
+                    // 若是移動平台，只在玩家未移動時才帶動（部分位移，避免過度黏著）
+                    if (platform.hasComponent(MovingPlatformComponent.class)) {
+                        MovingPlatformComponent mp = platform.getComponent(MovingPlatformComponent.class);
+                        boolean playerIdle = Math.abs(velocityX) < 1e-3;  // 玩家橫速接近 0
+                        if (playerIdle) {
+                            double carry = 0.6;  // 只帶 60% 位移，讓角色能稍微滑動
+                            entity.setX(entity.getX() + mp.getDeltaX() * carry);
+                            entity.setY(entity.getY() + mp.getDeltaY() * carry);
+                        }
+                    }
                     
                     // 在這裡添加彈跳平台檢測
                     if (platform.hasComponent(BouncePlatformComponent.class)) {
@@ -3355,10 +3464,10 @@ public void onUpdate(double tpf) {
         }
     }
     
-    // 邊界檢查
-    double leftBoundary = radius;
-    double rightBoundary = 5000 - radius; // 使用整個關卡寬度 FINISH_X
-    double topBoundary = radius;
+    // 邊界檢查（使用半寬/半高）
+    double leftBoundary = halfW;
+    double rightBoundary = 5000 - halfW; // 使用整個關卡寬度 FINISH_X
+    double topBoundary = halfH;
     if (entity.getX() < leftBoundary) {
         entity.setX(leftBoundary);
         velocityX = 0;
@@ -3372,15 +3481,67 @@ public void onUpdate(double tpf) {
         velocityY = 0;
     }
     
+    // 更新動畫狀態
+    if (animComponent != null) {
+        boolean horizontalInput = leftHeld || rightHeld;
+
+        // 短暫保持 walk，避免按鍵鬆開瞬間閃爍到 idle
+        if (horizontalInput) {
+            walkGraceTimer = 0.0;
+        } else {
+            walkGraceTimer += tpf;
+        }
+
+        if (!onGround) {
+            // 空中：根據速度判斷是 jump 還是 fall
+            if (velocityY < 0) {
+                animComponent.setState("jump");
+            } else {
+                animComponent.setState("fall");
+            }
+        } else if (horizontalInput || walkGraceTimer < 0.15) {
+            // 地面且有移動鍵，或在釋放後 0.15 秒內保持 walk
+            animComponent.setState("walk");
+        } else {
+            animComponent.setState("idle");
+        }
+    } else {
+        System.err.println("[PLAYER CONTROL] animComponent is NULL!");
+    }
+    
     velocityX = 0;
 }
 
     public void moveLeft() {
         velocityX = -speed;
+        setFacing(-1);  // 面向左邊
     }
-
     public void moveRight() {
         velocityX = speed;
+        setFacing(1);  // 面向右邊
+    }
+
+    public void setLeftHeld(boolean held) {
+        leftHeld = held;
+    }
+
+    public void setRightHeld(boolean held) {
+        rightHeld = held;
+    }
+    
+    private void setFacing(int direction) {
+        if (facingDirection != direction) {
+            facingDirection = direction;
+            // 只改變 ImageView 的 scaleX，不改變整個 entity
+            // 這樣 nameText 就不會受到影響
+            if (imageView != null) {
+                imageView.setScaleX(direction);
+            }
+        }
+    }
+    
+    public int getFacingDirection() {
+        return facingDirection;
     }
 
     public void jump() {
@@ -3388,6 +3549,22 @@ public void onUpdate(double tpf) {
             velocityY = -jumpStrength;
             onGround = false;
         }
+    }
+    
+    public void setAnimationComponent(PlayerAnimationComponent animComp) {
+        this.animComponent = animComp;
+        // 從動畫組件獲取 ImageView 引用
+        if (animComp != null) {
+            this.imageView = animComp.getImageView();
+        }
+    }
+    
+    public void setNameText(javafx.scene.text.Text nameText) {
+        this.nameText = nameText;
+    }
+    
+    public void setBodyNode(javafx.scene.Node bodyNode) {
+        this.bodyNode = bodyNode;
     }
 
     public void crouch(boolean crouching) {
@@ -3398,6 +3575,10 @@ public void onUpdate(double tpf) {
     public boolean isCrouching() {
         return crouching;
     }
+    
+    public boolean isOnGround() {
+        return onGround;
+    }
 }
 // 移動平台組件
 class MovingPlatformComponent extends Component {
@@ -3405,6 +3586,8 @@ class MovingPlatformComponent extends Component {
     private double moveSpeed, moveRange;
     private boolean horizontal;
     private double elapsed = 0;
+    private double lastX, lastY;
+    private double deltaX, deltaY;
     
     public MovingPlatformComponent(boolean horizontal, double speed, double range) {
         this.horizontal = horizontal;
@@ -3416,19 +3599,29 @@ class MovingPlatformComponent extends Component {
     public void onAdded() {
         startX = entity.getX();
         startY = entity.getY();
+        lastX = startX;
+        lastY = startY;
     }
     
     @Override
     public void onUpdate(double tpf) {
         elapsed += tpf;
         double offset = Math.sin(elapsed * moveSpeed) * moveRange / 2;
+        double newX = horizontal ? startX + offset : entity.getX();
+        double newY = horizontal ? entity.getY() : startY + offset;
         
-        if (horizontal) {
-            entity.setX(startX + offset);
-        } else {
-            entity.setY(startY + offset);
-        }
+        entity.setX(newX);
+        entity.setY(newY);
+
+        deltaX = entity.getX() - lastX;
+        deltaY = entity.getY() - lastY;
+        lastX = entity.getX();
+        lastY = entity.getY();
     }
+
+    public double getDeltaX() { return deltaX; }
+    public double getDeltaY() { return deltaY; }
+    public boolean isHorizontal() { return horizontal; }
 }
 
 // 旋轉平台組件
@@ -3581,5 +3774,373 @@ class CollisionInfo {
     public CollisionInfo(boolean collided, CollisionSide side) {
         this.collided = collided;
         this.side = side;
+    }
+}
+
+// 玩家動畫組件
+class PlayerAnimationComponent extends Component {
+    private int characterIndex;  // 1, 2, 3
+    private String currentState = "idle";  // idle, walk, jump, fall, death
+    private List<Image> idleFrames = new ArrayList<>();
+    private List<Image> walkFrames = new ArrayList<>();
+    private List<Image> jumpFrames = new ArrayList<>();
+    private List<Image> fallFrames = new ArrayList<>();
+    private int currentFrame = 0;
+    private double frameTimer = 0;
+    // 調整幀間隔：將 idle 動畫改為更慢的速度，避免太快看不清
+    // 0.20秒/幀 ≈ 5 FPS，比較容易辨識
+    private double frameInterval = 0.20;
+    private double walkFrameInterval = 0.12;  // 稍快一點的行走幀率
+    private double jumpFrameInterval = 0.20;  // jump 幀速率
+    private double fallFrameInterval = 0.20;  // fall 幀速率
+    // idle 動畫只循環 1~8，跳過第 0 幀（空白的 player1.png）
+    private ImageView imageView;
+    
+    public PlayerAnimationComponent(int characterIndex) {
+        this.characterIndex = characterIndex;
+        System.out.println("[ANIMATION] Creating PlayerAnimationComponent for player" + characterIndex);
+    }
+    
+    @Override
+    public void onAdded() {
+        super.onAdded();
+        // 從 Entity 的 ViewComponent 中提取 ImageView
+        try {
+            javafx.scene.Node viewNode = entity.getViewComponent().getChildren().get(0);
+            System.out.println("[ANIMATION] ViewComponent child 0 type: " + (viewNode != null ? viewNode.getClass().getName() : "NULL"));
+            
+            if (viewNode instanceof javafx.scene.Group g) {
+                System.out.println("[ANIMATION] Found Group with " + g.getChildren().size() + " children");
+                for (javafx.scene.Node child : g.getChildren()) {
+                    System.out.println("[ANIMATION]   - Child type: " + child.getClass().getName());
+                    if (child instanceof ImageView iv) {
+                        imageView = iv;
+                        System.out.println("[ANIMATION] Found ImageView in Group! Size: " + iv.getFitWidth() + "x" + iv.getFitHeight());
+                        break;
+                    }
+                }
+            } else if (viewNode instanceof ImageView iv) {
+                imageView = iv;
+                System.out.println("[ANIMATION] Found direct ImageView! Size: " + iv.getFitWidth() + "x" + iv.getFitHeight());
+            }
+        } catch (Exception e) {
+            System.err.println("[ANIMATION] Failed to extract ImageView: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        if (imageView != null) {
+            // 確保 ImageView 的初始設定正確
+            imageView.setFitWidth(128);
+            imageView.setFitHeight(128);
+            imageView.setPreserveRatio(true);
+            imageView.setTranslateX(-64);
+            imageView.setTranslateY(-64);
+            System.out.println("[ANIMATION] ImageView initialized: " + imageView.getFitWidth() + "x" + imageView.getFitHeight());
+            
+            loadIdleAnimation();
+            loadWalkAnimation();
+            loadJumpAnimation();
+            loadFallAnimation();
+        } else {
+            System.err.println("[ANIMATION] ImageView is still NULL after onAdded!");
+        }
+    }
+    
+    private void loadIdleAnimation() {
+        idleFrames.clear();
+        // 加載 player{characterIndex}/idle/ 中的所有圖片
+        for (int i = 1; i <= 9; i++) {  // idle 有 9 幀
+            try {
+                String path = "file:map picture/player" + characterIndex + "/idle/player" + i + ".png";
+                Image img = new Image(path);
+                idleFrames.add(img);
+                System.out.println("[ANIMATION] Loaded idle frame " + i + ": " + path);
+            } catch (Exception e) {
+                System.err.println("[ANIMATION] Failed to load idle frame " + i + ": " + e.getMessage());
+            }
+        }
+        System.out.println("[ANIMATION] Loaded " + idleFrames.size() + " idle frames for player" + characterIndex);
+
+        // 設定初始顯示為第 0 幀，並確保不透明且可見，且要確保是 idle 狀態
+        currentState = "idle";
+        currentFrame = 0;
+        frameTimer = 0;
+        if (imageView != null && !idleFrames.isEmpty()) {
+            Image first = idleFrames.get(0);
+            if (first != null && first.getWidth() > 0 && first.getHeight() > 0) {
+                imageView.setImage(first);
+                imageView.setOpacity(1.0);
+                imageView.setVisible(true);
+                imageView.setFitWidth(128);
+                imageView.setFitHeight(128);
+                imageView.setPreserveRatio(true);
+                imageView.setTranslateX(-64);
+                imageView.setTranslateY(-64);
+                System.out.println("[ANIMATION] Initial state set to idle, frame 0 displayed");
+            } else {
+                System.err.println("[ANIMATION] Idle frame 0 is null or empty!");
+            }
+        }
+    }
+
+    private void loadWalkAnimation() {
+        walkFrames.clear();
+        // walk 幀命名為 player10~player19，無空白幀
+        for (int i = 10; i <= 19; i++) {
+            try {
+                String path = "file:map picture/player" + characterIndex + "/walk/player" + i + ".png";
+                Image img = new Image(path);
+                walkFrames.add(img);
+                System.out.println("[ANIMATION] Loaded walk frame " + i + ": " + path);
+            } catch (Exception e) {
+                System.err.println("[ANIMATION] Failed to load walk frame " + i + ": " + e.getMessage());
+            }
+        }
+        System.out.println("[ANIMATION] Loaded " + walkFrames.size() + " walk frames for player" + characterIndex);
+    }
+
+    private void loadJumpAnimation() {
+        jumpFrames.clear();
+        // jump 幀：player20
+        String path = "file:map picture/player" + characterIndex + "/jump/player20.png";
+        System.out.println("[ANIMATION] Attempting to load jump frame from: " + path);
+        try {
+            Image img = new Image(path, false);  // 使用同步載入
+            
+            // 等待圖片載入完成
+            if (img.isError()) {
+                System.err.println("[ANIMATION] Jump image loading error: " + img.getException());
+                img.getException().printStackTrace();
+            } else {
+                // 檢查尺寸
+                double w = img.getWidth();
+                double h = img.getHeight();
+                System.out.println("[ANIMATION] Jump image dimensions: " + w + "x" + h);
+                
+                if (w == 0 || h == 0) {
+                    System.err.println("[ANIMATION] Jump image has zero dimensions!");
+                } else {
+                    jumpFrames.add(img);
+                    System.out.println("[ANIMATION] Loaded jump frame successfully!");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[ANIMATION] Exception loading jump frame: " + e.getMessage());
+            e.printStackTrace();
+        }
+        System.out.println("[ANIMATION] Total jump frames loaded: " + jumpFrames.size());
+    }
+
+    private void loadFallAnimation() {
+        fallFrames.clear();
+        // fall 幀：player21
+        String path = "file:map picture/player" + characterIndex + "/fall/player21.png";
+        System.out.println("[ANIMATION] Attempting to load fall frame from: " + path);
+        try {
+            Image img = new Image(path, false);  // 使用同步載入
+            
+            // 等待圖片載入完成
+            if (img.isError()) {
+                System.err.println("[ANIMATION] Fall image loading error: " + img.getException());
+                img.getException().printStackTrace();
+            } else {
+                // 檢查尺寸
+                double w = img.getWidth();
+                double h = img.getHeight();
+                System.out.println("[ANIMATION] Fall image dimensions: " + w + "x" + h);
+                
+                if (w == 0 || h == 0) {
+                    System.err.println("[ANIMATION] Fall image has zero dimensions!");
+                } else {
+                    fallFrames.add(img);
+                    System.out.println("[ANIMATION] Loaded fall frame successfully!");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[ANIMATION] Exception loading fall frame: " + e.getMessage());
+            e.printStackTrace();
+        }
+        System.out.println("[ANIMATION] Total fall frames loaded: " + fallFrames.size());
+    }
+    
+    @Override
+    public void onUpdate(double tpf) {
+        if (imageView == null) {
+            return;  // 沒有 ImageView，無法更新動畫
+        }
+        
+        List<Image> frames = getFramesForState(currentState);
+        if (frames.isEmpty()) {
+            System.err.println("[ANIMATION] No frames for state: " + currentState);
+            return;
+        }
+
+        // 防禦：若 currentFrame 超界，重置到迴圈起點
+        if (currentFrame < 0 || currentFrame >= frames.size()) {
+            currentFrame = getLoopStartIndex(currentState, frames);
+        }
+
+        frameTimer += tpf;
+        double interval = getIntervalForState(currentState);
+        if (frameTimer < interval) {
+            return;
+        }
+
+        frameTimer -= interval;
+        int loopStart = getLoopStartIndex(currentState, frames);
+        currentFrame = (currentFrame + 1) % frames.size();
+        
+        // 若當前幀無圖片或尺寸為 0，跳到下一個非空幀
+        Image currentImage = frames.get(currentFrame);
+        if (currentImage == null || currentImage.getWidth() == 0 || currentImage.getHeight() == 0) {
+            System.err.println("[ANIMATION] Frame " + currentFrame + " for state " + currentState + " is empty or null");
+            currentFrame = firstNonEmptyFrameIndex(frames);
+            if (currentFrame >= frames.size()) {
+                System.err.println("[ANIMATION] Could not find non-empty frame in state: " + currentState);
+                return;
+            }
+            currentImage = frames.get(currentFrame);
+        }
+
+        imageView.setImage(currentImage);
+        imageView.setOpacity(1.0);
+        imageView.setVisible(true);
+        imageView.setFitWidth(128);
+        imageView.setFitHeight(128);
+        imageView.setPreserveRatio(true);
+        imageView.setTranslateX(-64);
+        imageView.setTranslateY(-64);
+    }
+    
+    public void setState(String newState) {
+        if (!newState.equals(currentState)) {
+            System.out.println("[ANIMATION] setState called: " + currentState + " -> " + newState);
+            this.currentState = newState;
+            List<Image> frames = getFramesForState(newState);
+            System.out.println("[ANIMATION] Frames available for " + newState + ": " + frames.size());
+            this.currentFrame = getLoopStartIndex(newState, frames);
+            this.frameTimer = 0;
+            if (!frames.isEmpty() && imageView != null) {
+                Image img = frames.get(currentFrame);
+                if (img != null && img.getWidth() > 0 && img.getHeight() > 0) {
+                    imageView.setImage(img);
+                    imageView.setOpacity(1.0);
+                    imageView.setVisible(true);
+                    imageView.setFitWidth(128);
+                    imageView.setFitHeight(128);
+                    imageView.setPreserveRatio(true);
+                    imageView.setTranslateX(-64);
+                    imageView.setTranslateY(-64);
+                    System.out.println("[ANIMATION] Successfully changed to " + newState + " (frame " + currentFrame + ", size: " + img.getWidth() + "x" + img.getHeight() + ")");
+                } else {
+                    System.err.println("[ANIMATION] Frame " + currentFrame + " in state " + newState + " is null or empty (img=" + img + ")");
+                }
+            } else {
+                System.err.println("[ANIMATION] Cannot set state " + newState + ": frames.size=" + frames.size() + ", imageView=" + (imageView != null ? "OK" : "NULL"));
+            }
+        }
+    }
+    
+    public String getState() {
+        return currentState;
+    }
+    
+    public ImageView getImageView() {
+        return imageView;
+    }
+
+    // 切換玩家角色索引，並重新載入對應動畫幀
+    public void setCharacterIndex(int index) {
+        if (this.characterIndex == index) return;
+        this.characterIndex = index;
+        // 重新載入所有動畫幀
+        loadIdleAnimation();
+        loadWalkAnimation();
+        loadJumpAnimation();
+        loadFallAnimation();
+        // 立即更新為第一幀以避免閃爍
+        if (imageView != null && !idleFrames.isEmpty()) {
+            imageView.setImage(idleFrames.get(1));  // 從第 1 幀開始
+            imageView.setFitWidth(128);
+            imageView.setFitHeight(128);
+            imageView.setPreserveRatio(true);
+            imageView.setTranslateX(-64);
+            imageView.setTranslateY(-64);
+        }
+        System.out.println("[ANIMATION] Character index changed to " + index + ", reloaded idle frames: " + idleFrames.size());
+    }
+
+    // 當玩家視圖被替換（例如換角色）時，重新從 Entity 取出新的 ImageView
+    public void refreshImageViewFromEntity() {
+        if (entity == null) return;
+        try {
+            javafx.scene.Node viewNode = entity.getViewComponent().getChildren().get(0);
+            ImageView found = null;
+            if (viewNode instanceof javafx.scene.Group g) {
+                for (javafx.scene.Node child : g.getChildren()) {
+                    if (child instanceof ImageView iv) { found = iv; break; }
+                }
+            } else if (viewNode instanceof ImageView iv) {
+                found = iv;
+            }
+            if (found != null) {
+                imageView = found;
+                imageView.setFitWidth(128);
+                imageView.setFitHeight(128);
+                imageView.setPreserveRatio(true);
+                imageView.setTranslateX(-64);
+                imageView.setTranslateY(-64);
+                // 立即顯示第一幀
+                if (!idleFrames.isEmpty()) {
+                    imageView.setImage(idleFrames.get(1));  // 從第 1 幀開始
+                }
+                System.out.println("[ANIMATION] Rebound ImageView after view change");
+            } else {
+                System.err.println("[ANIMATION] Failed to rebind ImageView after view change");
+            }
+        } catch (Exception e) {
+            System.err.println("[ANIMATION] Exception refreshing ImageView: " + e.getMessage());
+        }
+    }
+
+    private List<Image> getFramesForState(String state) {
+        return switch (state) {
+            case "walk" -> walkFrames;  // walk 只用 walkFrames，不退回到 idle
+            case "jump" -> jumpFrames;
+            case "fall" -> fallFrames;
+            case "idle" -> idleFrames;
+            default -> idleFrames;  // 其他狀態暫時共用 idle
+        };
+    }
+
+    private int getLoopStartIndex(String state, List<Image> frames) {
+        int fallback = Math.min(firstNonEmptyFrameIndex(frames), Math.max(0, frames.size() - 1));
+        return switch (state) {
+            case "idle" -> 0;                  // idle 從 0 開始
+            case "walk" -> 0;                  // walk 從 0 開始（player10 是首幀）
+            case "jump" -> 0;                  // jump 從 0 開始（player20）
+            case "fall" -> 0;                  // fall 從 0 開始（player21）
+            default -> fallback;  // death 等其他狀態使用第一個非空幀
+        };
+    }
+
+    private int firstNonEmptyFrameIndex(List<Image> frames) {
+        for (int i = 0; i < frames.size(); i++) {
+            Image img = frames.get(i);
+            if (img != null && img.getWidth() > 0 && img.getHeight() > 0) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private double getIntervalForState(String state) {
+        return switch (state) {
+            case "walk" -> walkFrameInterval;
+            case "jump" -> jumpFrameInterval;
+            case "fall" -> fallFrameInterval;
+            case "idle" -> frameInterval;
+            default -> frameInterval;
+        };
     }
 }
