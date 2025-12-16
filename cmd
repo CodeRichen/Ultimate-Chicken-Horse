@@ -15,20 +15,13 @@ Remove-Item .\target\classes -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item .\bin\*.class -ErrorAction SilentlyContinue
 
 # 重新編譯
-javac --module-path "D:\Tools\javafx-sdk-17.0.17\lib" `
-      -cp ".;fxgl-21.1-uber.jar" `
-      --add-modules javafx.controls,javafx.fxml,javafx.graphics `
-      *.java
+javac --module-path "D:\Tools\javafx-sdk-17.0.17\lib" -cp ".;fxgl-21.1-uber.jar" --add-modules javafx.controls,javafx.fxml,javafx.graphics *.java
+
 
 # 執行
 java -cp ".;fxgl-21.1-uber.jar" GameServer
 
-java --module-path "D:\Tools\javafx-sdk-17.0.17\lib" `
-     -cp ".;fxgl-21.1-uber.jar" `
-     --add-modules javafx.controls,javafx.fxml,javafx.graphics `
-     GameClient
-
-
+java --module-path "D:\Tools\javafx-sdk-17.0.17\lib" -cp ".;fxgl-21.1-uber.jar" --add-modules javafx.controls,javafx.fxml,javafx.graphics GameClient
 技術差異:
 
 Socket 連接 (TCP) - 你的遊戲使用的方式:
