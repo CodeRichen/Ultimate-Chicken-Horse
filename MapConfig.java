@@ -46,7 +46,7 @@ class MapPlatform implements Serializable {
 }
 
 public class MapConfig {
-    private static final String MAP_FILE = "map_config.dat";
+    private static final String MAP_FILE = "tilemap_config.dat";
     private List<MapPlatform> platforms;
     
     public MapConfig() {

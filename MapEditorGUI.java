@@ -1,5 +1,8 @@
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +51,7 @@ public class MapEditorGUI extends Application {
     private static final double CANVAS_WIDTH = 1200;
     private static final double CANVAS_HEIGHT = 600;
     private static final double SCALE = CANVAS_WIDTH / MAP_WIDTH;
+    private static final double CLICK_THRESHOLD = 5.0; // world coords threshold for click vs drag
     
     // 繪製模式
     private String currentMode = "NORMAL";
@@ -90,6 +94,7 @@ public class MapEditorGUI extends Application {
         // 嘗試載入現有地圖
         try {
             mapConfig.load();
+            normalizeImagePathsInMapConfig();
             System.out.println("已載入現有地圖配置");
         } catch (Exception e) {
             System.out.println("沒有找到現有地圖，從空白開始");
@@ -374,11 +379,48 @@ public class MapEditorGUI extends Application {
         if (isDragging && e.getButton() == MouseButton.PRIMARY) {
             double worldX = e.getX() / SCALE;
             double worldY = e.getY() / SCALE;
-            
+            // 判斷是否為單點擊（點擊與釋放距離很小）
+            double dx = Math.abs(worldX - dragStartX);
+            double dy = Math.abs(worldY - dragStartY);
+            if (dx <= CLICK_THRESHOLD && dy <= CLICK_THRESHOLD) {
+                // 單點擊：直接以圖片預設尺寸或 Spinner 尺寸放置方塊，點擊位置為方塊中心
+                int w, h;
+                if (lockImageSize && currentImagePath != null) {
+                    w = (int)Math.round(lockedImageWidth);
+                    h = (int)Math.round(lockedImageHeight);
+                } else {
+                    // 若有預設圖片可用，使用其尺寸
+                    String typeStr = typeCombo.getValue().split(" - ")[0];
+                    String defaultImg = getDefaultImageForType(typeStr);
+                    Image img = null;
+                    if (currentImagePath != null) img = loadImage(currentImagePath);
+                    if (img == null && defaultImg != null) img = loadImage(defaultImg);
+                    if (img != null) {
+                        w = (int)Math.round(img.getWidth());
+                        h = (int)Math.round(img.getHeight());
+                    } else {
+                        w = widthSpinner.getValue();
+                        h = heightSpinner.getValue();
+                    }
+                }
+
+                double x = worldX - w / 2.0;
+                double y = worldY - h / 2.0;
+                createPlatform(x, y, w, h);
+                statusLabel.setText("✓ 已以單擊放置平台");
+                isDragging = false;
+                redraw();
+                return;
+            }
+
+            // 非單擊，使用拖曳範圍建立平台
+            double x = Math.min(dragStartX, worldX);
+            double y = Math.min(dragStartY, worldY);
+            double width = Math.abs(worldX - dragStartX);
+            double height = Math.abs(worldY - dragStartY);
+
             // 圖片模式：固定圖片原始尺寸
             if (lockImageSize && currentImagePath != null) {
-                double x = Math.min(dragStartX, worldX);
-                double y = Math.min(dragStartY, worldY);
                 int w = (int)Math.round(lockedImageWidth);
                 int h = (int)Math.round(lockedImageHeight);
                 createPlatform(x, y, w, h);
@@ -388,11 +430,6 @@ public class MapEditorGUI extends Application {
                 return;
             }
 
-            double x = Math.min(dragStartX, worldX);
-            double y = Math.min(dragStartY, worldY);
-            double width = Math.abs(worldX - dragStartX);
-            double height = Math.abs(worldY - dragStartY);
-            
             // 最小尺寸限制
             if (width >= 30 && height >= 10) {
                 createPlatform(x, y, (int)width, (int)height);
@@ -400,7 +437,7 @@ public class MapEditorGUI extends Application {
             } else {
                 statusLabel.setText("平台太小，請重新拖曳");
             }
-            
+
             isDragging = false;
             redraw();
         } else if (isDraggingPlatform && e.getButton() == MouseButton.PRIMARY) {
@@ -429,7 +466,13 @@ public class MapEditorGUI extends Application {
             finalH = (int)Math.round(lockedImageHeight);
         }
         
-        MapPlatform platform = new MapPlatform(x, y, finalW, finalH, color, rotation, typeStr, currentImagePath);
+        // 若使用者未指定圖片，嘗試使用預設的 map picture 內對應圖片
+        String imagePathToUse = currentImagePath;
+        if (imagePathToUse == null || imagePathToUse.isEmpty()) {
+            imagePathToUse = getDefaultImageForType(typeStr);
+        }
+
+        MapPlatform platform = new MapPlatform(x, y, finalW, finalH, color, rotation, typeStr, imagePathToUse);
         mapConfig.addPlatform(platform);
         
         widthSpinner.getValueFactory().setValue(finalW);
@@ -507,6 +550,21 @@ public class MapEditorGUI extends Application {
             case "MOVING_V" -> "垂直移動";
             default -> "普通平台";
         };
+    }
+
+    /**
+     * 回傳對應平台類型在 map picture 下的預設圖片路徑（若存在），否則回傳 null
+     */
+    private String getDefaultImageForType(String type) {
+        String filename = switch (type) {
+            case "DEATH" -> "death.png";
+            case "BOUNCE" -> "bounce.png";
+            case "MOVING_H" -> "moving_h.png";
+            case "MOVING_V" -> "moving_v.png";
+            default -> "normal.png";
+        };
+        File f = new File("map picture" + File.separator + filename);
+        return f.exists() ? ("map picture/" + filename) : null;
     }
     
     private void redraw() {
@@ -648,7 +706,7 @@ public class MapEditorGUI extends Application {
     private void saveMap() {
         try {
             mapConfig.save();
-            statusLabel.setText("✓ 地圖已儲存到 map_config.dat");
+            statusLabel.setText("✓ 地圖已儲存到 tilemap_config.dat");
             Alert alert = new Alert(Alert.AlertType.INFORMATION);
             alert.setTitle("儲存成功");
             alert.setHeaderText(null);
@@ -667,6 +725,7 @@ public class MapEditorGUI extends Application {
     private void loadMap() {
         try {
             mapConfig.load();
+            normalizeImagePathsInMapConfig();
             selectedPlatform = null;
             selectedIndex = -1;
             redraw();
@@ -683,6 +742,59 @@ public class MapEditorGUI extends Application {
             alert.setHeaderText(null);
             alert.setContentText("載入地圖時發生錯誤:\n" + e.getMessage());
             alert.showAndWait();
+        }
+    }
+
+    /**
+     * 將 mapConfig 中每個 MapPlatform 的 imagePath 正規化：
+     * - 若為絕對路徑且檔案不存在，嘗試從檔名對應到專案的 "map picture/" 下的檔案
+     * - 若原始路徑已包含 "map picture"，嘗試取相對子路徑
+     */
+    private void normalizeImagePathsInMapConfig() {
+        List<MapPlatform> platforms = mapConfig.getPlatforms();
+        for (MapPlatform p : platforms) {
+            if (p.imagePath == null || p.imagePath.isBlank()) continue;
+
+            try {
+                String path = p.imagePath.replace('\\', '/');
+                File direct = new File(p.imagePath);
+                if (direct.exists()) {
+                    // 如果絕對路徑指向本機存在的檔案，嘗試將其轉為 map picture 相對路徑（如果位於該資料夾）
+                    String lower = direct.getAbsolutePath().toLowerCase();
+                    int idx = lower.indexOf("map picture");
+                    if (idx >= 0) {
+                        String rel = direct.getAbsolutePath().substring(idx).replace('\\', '/');
+                        p.imagePath = rel;
+                    } else {
+                        // 若檔案不在 map picture，但我們希望使用 project 的 map picture，先嘗試複製已在 browseImage 中做過，但不強制複製，改為使用檔名匹配
+                        String name = direct.getName();
+                        File alt = new File("map picture", name);
+                        if (alt.exists()) {
+                            p.imagePath = "map picture/" + name;
+                        } else {
+                            // 保持原始絕對路徑（載入時 loadImage 會嘗試 alt route）
+                            p.imagePath = direct.getAbsolutePath();
+                        }
+                    }
+                } else {
+                    // direct 不存在，可能是舊絕對路徑，提取檔名並嘗試 map picture
+                    String name = new File(path).getName();
+                    File alt = new File("map picture", name);
+                    if (alt.exists()) {
+                        p.imagePath = "map picture/" + name;
+                    } else {
+                        // 若 path 已經包含 map picture 部分但格式不同，嘗試修正
+                        if (path.toLowerCase().contains("map picture")) {
+                            int idx = path.toLowerCase().indexOf("map picture");
+                            String rel = path.substring(idx);
+                            File relFile = new File(rel);
+                            if (relFile.exists()) p.imagePath = rel.replace('\\', '/');
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                // 忽略，保留原始 imagePath
+            }
         }
     }
     
@@ -776,21 +888,53 @@ public class MapEditorGUI extends Application {
         
         File file = fileChooser.showOpenDialog(canvas.getScene().getWindow());
         if (file != null && file.exists()) {
-            currentImagePath = file.getAbsolutePath();
-            Image img = loadImage(currentImagePath);
+            // 優先轉為相對路徑（若檔案位於專案的 map picture 目錄），否則嘗試複製到 map picture
+            String chosenPath = toRelativeImagePath(file);
+            Image img = loadImage(chosenPath);
             if (img != null) {
+                currentImagePath = chosenPath;
                 lockedImageWidth = img.getWidth();
                 lockedImageHeight = img.getHeight();
                 lockImageSize = true;
-                imagePathField.setText(file.getName());
+                // 顯示相對路徑或檔名
+                imagePathField.setText(currentImagePath.contains("map picture") ? currentImagePath : file.getName());
                 widthSpinner.setDisable(true);
                 heightSpinner.setDisable(true);
                 widthSpinner.getValueFactory().setValue((int)Math.round(lockedImageWidth));
                 heightSpinner.getValueFactory().setValue((int)Math.round(lockedImageHeight));
-                statusLabel.setText("✓ 已選擇圖片並鎖定尺寸: " + file.getName());
+                statusLabel.setText("✓ 已選擇圖片並鎖定尺寸: " + new File(currentImagePath).getName());
             } else {
                 statusLabel.setText("✗ 載入圖片失敗");
             }
+        }
+    }
+
+    /**
+     * 轉換選擇的圖片為相對路徑：
+     * - 若路徑中包含 "map picture"，回傳從該子目錄開始的相對路徑（使用 / 分隔）
+     * - 否則嘗試複製檔案到專案內的 "map picture/" 目錄，並回傳 "map picture/<filename>"
+     * - 若複製失敗，回傳原始絕對路徑
+     */
+    private String toRelativeImagePath(File file) {
+        try {
+            String abs = file.getAbsolutePath().replace('\\', '/');
+            String lower = abs.toLowerCase();
+            int idx = lower.indexOf("map picture");
+            if (idx >= 0) {
+                String rel = abs.substring(idx).replace('/', File.separatorChar);
+                // 使用 forward slash 風格給程式的其他部分辨識
+                return rel.replace(File.separatorChar, '/');
+            }
+
+            // 嘗試將檔案複製到專案的 map picture 資料夾
+            File destDir = new File("map picture");
+            if (!destDir.exists()) destDir.mkdirs();
+            File dest = new File(destDir, file.getName());
+            Files.copy(file.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            return "map picture/" + file.getName();
+        } catch (IOException e) {
+            // 失敗時回傳原始絕對路徑
+            return file.getAbsolutePath();
         }
     }
     
@@ -806,18 +950,35 @@ public class MapEditorGUI extends Application {
         if (imageCache.containsKey(imagePath)) {
             return imageCache.get(imagePath);
         }
-        
-        // 載入圖片
+
+        // 嘗試多種路徑解析：先原路徑，再相對 map picture/，最後回傳 null
         try {
+            // 1) 直接以傳入路徑嘗試
             File file = new File(imagePath);
             if (file.exists()) {
                 Image image = new Image(new FileInputStream(file));
                 imageCache.put(imagePath, image);
                 return image;
-            } else {
-                System.err.println("圖片檔案不存在: " + imagePath);
-                return null;
             }
+
+            // 2) 嘗試相對於專案的 map picture 目錄
+            File alt = new File("map picture", imagePath);
+            if (!alt.exists()) {
+                // 如果傳入的是像 "map picture/name.png" 的相對路徑，直接使用它
+                if (imagePath.contains("map picture")) {
+                    alt = new File(imagePath);
+                } else {
+                    alt = new File("map picture", imagePath);
+                }
+            }
+            if (alt.exists()) {
+                Image image = new Image(new FileInputStream(alt));
+                imageCache.put(imagePath, image);
+                return image;
+            }
+
+            System.err.println("圖片檔案不存在: " + imagePath);
+            return null;
         } catch (Exception e) {
             System.err.println("載入圖片失敗: " + imagePath + " - " + e.getMessage());
             return null;
