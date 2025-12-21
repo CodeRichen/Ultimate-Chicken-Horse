@@ -3310,12 +3310,18 @@ class PlatformComponent extends Component {
  * 修復後的玩家控制 - 放在 GameClient.java 中
  */
 class PlayerControl extends Component {
-    private double speed = 500.0;  // 改為 pixels/second (原本 8.0 pixels/frame ≈ 480 pixels/sec @ 60fps，已加速到 500)
+    private double speed = 420.0;  // 減低移動靈敏度：最大水平速度降低到 420 px/s
     private double velocityX = 0;
     public double velocityY = 0;  // 改為public以便死亡檢測使用
     private double jumpStrength = 650.0;  // 改為 pixels/second (增加跳躍力度至 650，讓跳躍更有力不飄)
-    private double gravity = 1200.0;  // 改為 pixels/second² (基礎重力，下落時使用)
-    private double gravityUp = 900.0;  // 上升時的重力（較輕，讓上升更順暢）
+    private double gravity = 1400.0;  // 增加重力，使下落更明顯
+    private double gravityUp = 1000.0;  // 上升時使用較輕的重力
+    // 水平加速度，用於平滑按鍵響應（降低靈敏度）
+    private double horizontalAccel = 3600.0; // px/s^2
+    // Fixed timestep / accumulator to keep physics deterministic across different FPS/GPU
+    private double physicsAccumulator = 0.0;
+    private static final double FIXED_DT = 1.0 / 60.0; // 60 Hz physics
+    private static final double MAX_TPF = 0.1; // clamp very large frame times
     private boolean onGround = false;
     private boolean crouching = false;
     private List<Entity> platforms;
@@ -3372,124 +3378,22 @@ class PlayerControl extends Component {
    @Override
 public void onUpdate(double tpf) {
     if (!enabled) return;  // 如果禁用，不處理任何移動
-    
-    // tpf = time per frame (in seconds)
-    // 使用 delta time 來計算移動，確保在不同 FPS 下速度一致
-    // 變速重力系統：上升時較輕，下落時較重，著陸時最輕
-    double currentGravity;
-    if (onGround && velocityY >= 0) {
-        currentGravity = gravity * 0.3;  // 著陸時重力減至 30%，防止卡頓
-    } else if (velocityY < 0) {
-        currentGravity = gravityUp;  // 上升時使用較輕的重力（900），讓上升更順暢
-    } else {
-        currentGravity = gravity;  // 下落時使用完整重力（1200），下落快速有力
-    }
-    velocityY += currentGravity * tpf;
-    
-    if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
-    if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
-    
-    // 先移動X
-    double halfW = getCurrentHalfWidth();
-    double halfH = getCurrentHalfHeight();
-    double oldX = entity.getX();
-    entity.setX(entity.getX() + velocityX * tpf);  // 乘以 tpf 使移動與時間相關
-    
-    // 檢查X方向碰撞
-    boolean xCollision = false;
-    for (Entity platform : platforms) {
-        if (!platform.hasComponent(PlatformComponent.class)) continue;
-        
-        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
-        
-        if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
-            entity.setX(oldX);  // 恢復到舊位置
-            velocityX = 0;
-            xCollision = true;
-            break;
-        }
-    }
-    
-    // 再移動Y
-    double oldY = entity.getY();
-    entity.setY(entity.getY() + velocityY * tpf);  // 乘以 tpf 使移動與時間相關
-    
-    onGround = false;
-    
-    // 檢查Y方向碰撞
-  for (Entity platform : platforms) {
-        if (!platform.hasComponent(PlatformComponent.class)) continue;
-        
-        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
-        
-        if (collision.collided) {
-            switch (collision.side) {
-                case TOP:
-                    // 站立在平台上：讓玩家圖像底部貼齊平台頂部（使用半高）
-                    entity.setY(platform.getY() - halfH);
-                    
-                    if (velocityY > 0) velocityY = 0;
-                    onGround = true;
 
-                    // 若是移動平台，只在玩家未移動時才帶動（部分位移，避免過度黏著）
-                    if (platform.hasComponent(MovingPlatformComponent.class)) {
-                        MovingPlatformComponent mp = platform.getComponent(MovingPlatformComponent.class);
-                        boolean playerIdle = Math.abs(velocityX) < 1e-3;  // 玩家橫速接近 0
-                        if (playerIdle) {
-                            double carry = 0.6;  // 只帶 60% 位移，讓角色能稍微滑動
-                            entity.setX(entity.getX() + mp.getDeltaX() * carry);
-                            entity.setY(entity.getY() + mp.getDeltaY() * carry);
-                        }
-                    }
-                    
-                    // 在這裡添加彈跳平台檢測
-                    if (platform.hasComponent(BouncePlatformComponent.class)) {
-                        BouncePlatformComponent bounce = platform.getComponent(BouncePlatformComponent.class);
-                        velocityY = -bounce.getBounceStrength();
-                        onGround = false;  // 彈跳時離地
-                    }
-                    break;
-                    
-                case BOTTOM:
-                    entity.setY(oldY);
-                    if (velocityY < 0) velocityY = 0;
-                    break;
-                    
-                case LEFT:
-                case RIGHT:
-                    if (!xCollision) {
-                        entity.setX(oldX);
-                        velocityX = 0;
-                    }
-                    break;
-            }
-        }
+    // 保護極端 tpf（避免暫停後大跳躍）
+    if (tpf > MAX_TPF) tpf = MAX_TPF;
+
+    physicsAccumulator += tpf;
+
+    // 針對不同硬體的差異，使用固定物理時間步，確保重力/跳躍一致
+    while (physicsAccumulator >= FIXED_DT) {
+        physicsStep(FIXED_DT);
+        physicsAccumulator -= FIXED_DT;
     }
-    
-    // 邊界檢查（使用半寬/半高）
-    double leftBoundary = halfW;
-    double rightBoundary = 5000 - halfW; // 使用整個關卡寬度 FINISH_X
-    double topBoundary = halfH;
-    if (entity.getX() < leftBoundary) {
-        entity.setX(leftBoundary);
-        velocityX = 0;
-    }
-    if (entity.getX() > rightBoundary) {
-        entity.setX(rightBoundary);
-        velocityX = 0;
-    }
-    if (entity.getY() < topBoundary) {
-        entity.setY(topBoundary);
-        velocityY = 0;
-    }
-    
-    // 更新動畫狀態
+
+    // 更新動畫與 UI 相關（使用原始 tpf 使動畫平滑）
     if (animComponent != null) {
         boolean horizontalInput = leftHeld || rightHeld;
 
-        // 短暫保持 walk，避免按鍵鬆開瞬間閃爍到 idle
         if (horizontalInput) {
             walkGraceTimer = 0.0;
         } else {
@@ -3497,24 +3401,117 @@ public void onUpdate(double tpf) {
         }
 
         if (!onGround) {
-            // 空中：根據速度判斷是 jump 還是 fall
-            if (velocityY < 0) {
-                animComponent.setState("jump");
-            } else {
-                animComponent.setState("fall");
-            }
+            if (velocityY < 0) animComponent.setState("jump"); else animComponent.setState("fall");
         } else if (horizontalInput || walkGraceTimer < 0.15) {
-            // 地面且有移動鍵，或在釋放後 0.15 秒內保持 walk
             animComponent.setState("walk");
         } else {
             animComponent.setState("idle");
         }
-    } else {
-        System.err.println("[PLAYER CONTROL] animComponent is NULL!");
     }
-    
-    velocityX = 0;
 }
+
+    /**
+     * 執行一個固定時間步的物理更新
+     */
+    private void physicsStep(double dt) {
+        // horizontal input 驅動（使用加速度平滑，降低靈敏度）
+        double inputX = 0;
+        if (leftHeld) inputX -= 1;
+        if (rightHeld) inputX += 1;
+        double targetVx = inputX * speed;
+        double maxDelta = horizontalAccel * dt;
+        double delta = targetVx - velocityX;
+        if (delta > maxDelta) delta = maxDelta;
+        if (delta < -maxDelta) delta = -maxDelta;
+        velocityX += delta;
+
+        // 計算當前重力（以固定步長套用）
+        double currentGravity;
+        if (onGround && velocityY >= 0) {
+            currentGravity = gravity * 0.3; // 著陸時較輕
+        } else if (velocityY < 0) {
+            currentGravity = gravityUp; // 上升時較輕
+        } else {
+            currentGravity = gravity; // 下落時較重
+        }
+
+        velocityY += currentGravity * dt;
+        if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
+        if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
+
+        // X 移動與碰撞
+        double halfW = getCurrentHalfWidth();
+        double halfH = getCurrentHalfHeight();
+        double oldX = entity.getX();
+        entity.setX(entity.getX() + velocityX * dt);
+
+        boolean xCollision = false;
+        for (Entity platform : platforms) {
+            if (!platform.hasComponent(PlatformComponent.class)) continue;
+            PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+            CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
+            if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
+                entity.setX(oldX);
+                velocityX = 0;
+                xCollision = true;
+                break;
+            }
+        }
+
+        // Y 移動與碰撞
+        double oldY = entity.getY();
+        entity.setY(entity.getY() + velocityY * dt);
+        onGround = false;
+
+        for (Entity platform : platforms) {
+            if (!platform.hasComponent(PlatformComponent.class)) continue;
+            PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+            CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
+            if (collision.collided) {
+                switch (collision.side) {
+                    case TOP -> {
+                        entity.setY(platform.getY() - halfH);
+                        if (velocityY > 0) velocityY = 0;
+                        onGround = true;
+
+                        if (platform.hasComponent(MovingPlatformComponent.class)) {
+                            MovingPlatformComponent mp = platform.getComponent(MovingPlatformComponent.class);
+                            boolean playerIdle = Math.abs(velocityX) < 1e-3;
+                            if (playerIdle) {
+                                double carry = 0.6;
+                                entity.setX(entity.getX() + mp.getDeltaX() * carry);
+                                entity.setY(entity.getY() + mp.getDeltaY() * carry);
+                            }
+                        }
+
+                        if (platform.hasComponent(BouncePlatformComponent.class)) {
+                            BouncePlatformComponent bounce = platform.getComponent(BouncePlatformComponent.class);
+                            velocityY = -bounce.getBounceStrength();
+                            onGround = false;
+                        }
+                    }
+                    case BOTTOM -> {
+                        entity.setY(oldY);
+                        if (velocityY < 0) velocityY = 0;
+                    }
+                    case LEFT, RIGHT -> {
+                        if (!xCollision) {
+                            entity.setX(oldX);
+                            velocityX = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 邊界檢查
+        double leftBoundary = halfW;
+        double rightBoundary = 5000 - halfW;
+        double topBoundary = halfH;
+        if (entity.getX() < leftBoundary) { entity.setX(leftBoundary); velocityX = 0; }
+        if (entity.getX() > rightBoundary) { entity.setX(rightBoundary); velocityX = 0; }
+        if (entity.getY() < topBoundary) { entity.setY(topBoundary); velocityY = 0; }
+    }
 
     public void moveLeft() {
         velocityX = -speed;
