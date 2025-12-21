@@ -37,7 +37,7 @@ import javafx.scene.text.Text;
 public class GameClient extends GameApplication {
 
     private static String SERVER_HOST = "127.0.0.1";
-    private static int SERVER_PORT = 12345;
+    private static int SERVER_PORT = 36459;
     
     private Entity player;
     private javafx.scene.text.Text lastCreatedNameText = null;  // 用於傳遞 nameText 給 PlayerControl
