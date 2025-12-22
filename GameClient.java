@@ -770,8 +770,11 @@ public class GameClient extends GameApplication {
         settings.setWidth(SCREEN_WIDTH);
         settings.setHeight(SCREEN_HEIGHT);
         settings.setTitle("Multiplayer Platform Race");
-        settings.setFullScreenAllowed(true);
-        settings.setFullScreenFromStart(false);
+        settings.setFullScreenAllowed(false);  // 禁用全屏模式
+        settings.setFullScreenFromStart(false);  // 不自動全屏
+        settings.setManualResizeEnabled(true);  // 允許手動調整窗口大小
+        settings.setPreserveResizeRatio(true);  // 保持寬高比
+        settings.setScaleAffectedOnResize(true);  // 窗口縮放時遊戲畫面也跟著縮放
     }
 
     @Override
@@ -1724,11 +1727,14 @@ private void hideLeaderboard() {
                         player != null && player.isVisible() ) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
+                            PlayerAnimationComponent animComp = player.getComponent(PlayerAnimationComponent.class);
+                            String currentAnimState = (animComp != null) ? animComp.getState() : "idle";
                             PlayerInfo info = new PlayerInfo(
                                 myPlayerId, toHex(myColor),
                                 player.getX(), player.getY(),
                                 pc.isCrouching(),
-                                player.getTransformComponent().getScaleY()
+                                player.getTransformComponent().getScaleY(),
+                                currentAnimState
                             );
                             out.writeObject(info);
                             out.flush();
@@ -2002,6 +2008,14 @@ private void handlePhaseChange(GamePhase newPhase) {
             SmoothPlayerComponent smoothComponent = otherPlayer.getComponent(SmoothPlayerComponent.class);
             smoothComponent.setTargetPosition(info.x, info.y);
             smoothComponent.setTargetScaleY(info.scaleY);
+            
+            // 同步動畫狀態
+            if (info.animState != null) {
+                PlayerAnimationComponent animComp = otherPlayer.getComponent(PlayerAnimationComponent.class);
+                if (animComp != null && !info.animState.equals(animComp.getState())) {
+                    animComp.setState(info.animState);
+                }
+            }
         }
     }
     
@@ -3323,149 +3337,154 @@ class PlayerControl extends Component {
     }
    @Override
 public void onUpdate(double tpf) {
-    if (!enabled) return;  // 如果禁用，不處理任何移動
-    
-    // tpf = time per frame (in seconds)
-    // 使用 delta time 來計算移動，確保在不同 FPS 下速度一致
-    // 變速重力系統：上升時較輕，下落時較重，著陸時最輕
-    double currentGravity;
-    if (onGround && velocityY >= 0) {
-        currentGravity = gravity * 0.3;  // 著陸時重力減至 30%，防止卡頓
-    } else if (velocityY < 0) {
-        currentGravity = gravityUp;  // 上升時使用較輕的重力（900），讓上升更順暢
-    } else {
-        currentGravity = gravity;  // 下落時使用完整重力（1200），下落快速有力
-    }
-    velocityY += currentGravity * tpf;
-    
-    if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
-    if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
-    
-    // 先移動X
-    double halfW = getCurrentHalfWidth();
-    double halfH = getCurrentHalfHeight();
-    double oldX = entity.getX();
-    entity.setX(entity.getX() + velocityX * tpf);  // 乘以 tpf 使移動與時間相關
-    
-    // 檢查X方向碰撞
-    boolean xCollision = false;
-    for (Entity platform : platforms) {
-        if (!platform.hasComponent(PlatformComponent.class)) continue;
-        
-        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
-        
-        if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
-            entity.setX(oldX);  // 恢復到舊位置
-            velocityX = 0;
-            xCollision = true;
-            break;
+    // 如果禁用，不處理移動和碰撞，但仍允許動畫播放（如死亡動畫）
+    if (enabled) {
+        // tpf = time per frame (in seconds)
+        // 使用 delta time 來計算移動，確保在不同 FPS 下速度一致
+        // 變速重力系統：上升時較輕，下落時較重，著陸時最輕
+        double currentGravity;
+        if (onGround && velocityY >= 0) {
+            currentGravity = gravity * 0.3;  // 著陸時重力減至 30%，防止卡頓
+        } else if (velocityY < 0) {
+            currentGravity = gravityUp;  // 上升時使用較輕的重力（900），讓上升更順暢
+        } else {
+            currentGravity = gravity;  // 下落時使用完整重力（1200），下落快速有力
         }
-    }
-    
-    // 再移動Y
-    double oldY = entity.getY();
-    entity.setY(entity.getY() + velocityY * tpf);  // 乘以 tpf 使移動與時間相關
-    
-    onGround = false;
-    
-    // 檢查Y方向碰撞
-  for (Entity platform : platforms) {
-        if (!platform.hasComponent(PlatformComponent.class)) continue;
+        velocityY += currentGravity * tpf;
         
-        PlatformComponent pc = platform.getComponent(PlatformComponent.class);
-        CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
+        if (velocityY > MAX_VELOCITY_Y) velocityY = MAX_VELOCITY_Y;
+        if (velocityY < -MAX_VELOCITY_Y) velocityY = -MAX_VELOCITY_Y;
         
-        if (collision.collided) {
-            switch (collision.side) {
-                case TOP:
-                    // 站立在平台上：讓玩家圖像底部貼齊平台頂部（使用半高）
-                    entity.setY(platform.getY() - halfH);
-                    
-                    if (velocityY > 0) velocityY = 0;
-                    onGround = true;
+        // 先移動X
+        double halfW = getCurrentHalfWidth();
+        double halfH = getCurrentHalfHeight();
+        double oldX = entity.getX();
+        entity.setX(entity.getX() + velocityX * tpf);  // 乘以 tpf 使移動與時間相關
+        
+        // 檢查X方向碰撞
+        boolean xCollision = false;
+        for (Entity platform : platforms) {
+            if (!platform.hasComponent(PlatformComponent.class)) continue;
+            
+            PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+            CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
+            
+            if (collision.collided && (collision.side == CollisionSide.LEFT || collision.side == CollisionSide.RIGHT)) {
+                entity.setX(oldX);  // 恢復到舊位置
+                velocityX = 0;
+                xCollision = true;
+                break;
+            }
+        }
+        
+        // 再移動Y
+        double oldY = entity.getY();
+        entity.setY(entity.getY() + velocityY * tpf);  // 乘以 tpf 使移動與時間相關
+        
+        onGround = false;
+        
+        // 檢查Y方向碰撞
+      for (Entity platform : platforms) {
+            if (!platform.hasComponent(PlatformComponent.class)) continue;
+            
+            PlatformComponent pc = platform.getComponent(PlatformComponent.class);
+            CollisionInfo collision = pc.checkCollision(entity.getX(), entity.getY(), halfW, halfH, velocityY);
+            
+            if (collision.collided) {
+                switch (collision.side) {
+                    case TOP:
+                        // 站立在平台上：讓玩家圖像底部貼齊平台頂部（使用半高）
+                        entity.setY(platform.getY() - halfH);
+                        
+                        if (velocityY > 0) velocityY = 0;
+                        onGround = true;
 
-                    // 若是移動平台，只在玩家未移動時才帶動（部分位移，避免過度黏著）
-                    if (platform.hasComponent(MovingPlatformComponent.class)) {
-                        MovingPlatformComponent mp = platform.getComponent(MovingPlatformComponent.class);
-                        boolean playerIdle = Math.abs(velocityX) < 1e-3;  // 玩家橫速接近 0
-                        if (playerIdle) {
-                            double carry = 0.6;  // 只帶 60% 位移，讓角色能稍微滑動
-                            entity.setX(entity.getX() + mp.getDeltaX() * carry);
-                            entity.setY(entity.getY() + mp.getDeltaY() * carry);
+                        // 若是移動平台，只在玩家未移動時才帶動（部分位移，避免過度黏著）
+                        if (platform.hasComponent(MovingPlatformComponent.class)) {
+                            MovingPlatformComponent mp = platform.getComponent(MovingPlatformComponent.class);
+                            boolean playerIdle = Math.abs(velocityX) < 1e-3;  // 玩家橫速接近 0
+                            if (playerIdle) {
+                                double carry = 0.6;  // 只帶 60% 位移，讓角色能稍微滑動
+                                entity.setX(entity.getX() + mp.getDeltaX() * carry);
+                                entity.setY(entity.getY() + mp.getDeltaY() * carry);
+                            }
                         }
-                    }
-                    
-                    // 在這裡添加彈跳平台檢測
-                    if (platform.hasComponent(BouncePlatformComponent.class)) {
-                        BouncePlatformComponent bounce = platform.getComponent(BouncePlatformComponent.class);
-                        velocityY = -bounce.getBounceStrength();
-                        onGround = false;  // 彈跳時離地
-                    }
-                    break;
-                    
-                case BOTTOM:
-                    entity.setY(oldY);
-                    if (velocityY < 0) velocityY = 0;
-                    break;
-                    
-                case LEFT:
-                case RIGHT:
-                    if (!xCollision) {
-                        entity.setX(oldX);
-                        velocityX = 0;
-                    }
-                    break;
+                        
+                        // 在這裡添加彈跳平台檢測
+                        if (platform.hasComponent(BouncePlatformComponent.class)) {
+                            BouncePlatformComponent bounce = platform.getComponent(BouncePlatformComponent.class);
+                            velocityY = -bounce.getBounceStrength();
+                            onGround = false;  // 彈跳時離地
+                        }
+                        break;
+                        
+                    case BOTTOM:
+                        entity.setY(oldY);
+                        if (velocityY < 0) velocityY = 0;
+                        break;
+                        
+                    case LEFT:
+                    case RIGHT:
+                        if (!xCollision) {
+                            entity.setX(oldX);
+                            velocityX = 0;
+                        }
+                        break;
+                }
             }
         }
-    }
-    
-    // 邊界檢查（使用半寬/半高）
-    double leftBoundary = halfW;
-    double rightBoundary = 5000 - halfW; // 使用整個關卡寬度 FINISH_X
-    double topBoundary = halfH;
-    if (entity.getX() < leftBoundary) {
-        entity.setX(leftBoundary);
-        velocityX = 0;
-    }
-    if (entity.getX() > rightBoundary) {
-        entity.setX(rightBoundary);
-        velocityX = 0;
-    }
-    if (entity.getY() < topBoundary) {
-        entity.setY(topBoundary);
-        velocityY = 0;
-    }
-    
-    // 更新動畫狀態
-    if (animComponent != null) {
-        boolean horizontalInput = leftHeld || rightHeld;
-
-        // 短暫保持 walk，避免按鍵鬆開瞬間閃爍到 idle
-        if (horizontalInput) {
-            walkGraceTimer = 0.0;
-        } else {
-            walkGraceTimer += tpf;
+        
+        // 邊界檢查（使用半寬/半高）
+        double leftBoundary = halfW;
+        double rightBoundary = 5000 - halfW; // 使用整個關卡寬度 FINISH_X
+        double topBoundary = halfH;
+        if (entity.getX() < leftBoundary) {
+            entity.setX(leftBoundary);
+            velocityX = 0;
         }
+        if (entity.getX() > rightBoundary) {
+            entity.setX(rightBoundary);
+            velocityX = 0;
+        }
+        if (entity.getY() < topBoundary) {
+            entity.setY(topBoundary);
+            velocityY = 0;
+        }
+        
+        // 更新動畫狀態（只在啟用且非死亡狀態時自動更新）
+        if (animComponent != null) {
+            // 如果當前是死亡動畫，不要覆蓋它
+            if (!animComponent.getState().equals("death")) {
+                boolean horizontalInput = leftHeld || rightHeld;
 
-        if (!onGround) {
-            // 空中：根據速度判斷是 jump 還是 fall
-            if (velocityY < 0) {
-                animComponent.setState("jump");
-            } else {
-                animComponent.setState("fall");
+                // 短暫保持 walk，避免按鍵鬆開瞬間閃爍到 idle
+                if (horizontalInput) {
+                    walkGraceTimer = 0.0;
+                } else {
+                    walkGraceTimer += tpf;
+                }
+
+                if (!onGround) {
+                    // 空中：根據速度判斷是 jump 還是 fall
+                    if (velocityY < 0) {
+                        animComponent.setState("jump");
+                    } else {
+                        animComponent.setState("fall");
+                    }
+                } else if (horizontalInput || walkGraceTimer < 0.15) {
+                    // 地面且有移動鍵，或在釋放後 0.15 秒內保持 walk
+                    animComponent.setState("walk");
+                } else {
+                    animComponent.setState("idle");
+                }
             }
-        } else if (horizontalInput || walkGraceTimer < 0.15) {
-            // 地面且有移動鍵，或在釋放後 0.15 秒內保持 walk
-            animComponent.setState("walk");
         } else {
-            animComponent.setState("idle");
+            System.err.println("[PLAYER CONTROL] animComponent is NULL!");
         }
-    } else {
-        System.err.println("[PLAYER CONTROL] animComponent is NULL!");
+        
+        velocityX = 0;
     }
-    
-    velocityX = 0;
+    // 如果禁用（死亡/完成），動畫仍然由 PlayerAnimationComponent.onUpdate() 處理
 }
 
     public void moveLeft() {

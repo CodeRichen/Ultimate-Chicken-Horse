@@ -195,14 +195,16 @@ class PlayerInfo implements Serializable {
     double y;
     boolean crouching;
     double scaleY;
+    String animState;  // 動畫狀態：idle, walk, jump, fall, death
     
-    public PlayerInfo(String playerId, String colorHex, double x, double y, boolean crouching, double scaleY) {
+    public PlayerInfo(String playerId, String colorHex, double x, double y, boolean crouching, double scaleY, String animState) {
         this.playerId = playerId;
         this.colorHex = colorHex;
         this.x = x;
         this.y = y;
         this.crouching = crouching;
         this.scaleY = scaleY;
+        this.animState = animState != null ? animState : "idle";
     }
 }
 
