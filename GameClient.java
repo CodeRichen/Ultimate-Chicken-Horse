@@ -26,7 +26,11 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Pane;
+import javafx.scene.effect.DropShadow;
 import javafx.scene.paint.Color;
+import javafx.scene.paint.LinearGradient;
+import javafx.scene.paint.Stop;
+import javafx.scene.paint.CycleMethod;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
@@ -199,13 +203,29 @@ public class GameClient extends GameApplication {
             }
             charBox.getChildren().add(charView);
             
-            // 選擇按鈕
-            javafx.scene.shape.Rectangle selectBtn = new javafx.scene.shape.Rectangle(150, 50, javafx.scene.paint.Color.rgb(50, 150, 50));
+            // 選擇按鈕（改用圓角 + 漸層 + 陰影 + hover 動畫）
+            javafx.scene.shape.Rectangle selectBtn = new javafx.scene.shape.Rectangle(150, 50);
+            selectBtn.setArcWidth(16);
+            selectBtn.setArcHeight(16);
+            LinearGradient selectGradient = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+                    new Stop(0, javafx.scene.paint.Color.web("#76d275")),
+                    new Stop(1, javafx.scene.paint.Color.web("#2c8c2c")));
+            selectBtn.setFill(selectGradient);
             selectBtn.setStroke(javafx.scene.paint.Color.WHITE);
             selectBtn.setStrokeWidth(2);
+            DropShadow selectDs = new DropShadow(8, javafx.scene.paint.Color.color(0,0,0,0.6));
+            selectBtn.setEffect(selectDs);
             selectBtn.setOnMouseClicked(e -> selectCharacter(idx));
-            selectBtn.setOnMouseEntered(e -> selectBtn.setFill(javafx.scene.paint.Color.rgb(100, 200, 100)));
-            selectBtn.setOnMouseExited(e -> selectBtn.setFill(javafx.scene.paint.Color.rgb(50, 150, 50)));
+            selectBtn.setOnMouseEntered(e -> {
+                selectBtn.setScaleX(1.05);
+                selectBtn.setScaleY(1.05);
+                selectDs.setRadius(14);
+            });
+            selectBtn.setOnMouseExited(e -> {
+                selectBtn.setScaleX(1.0);
+                selectBtn.setScaleY(1.0);
+                selectDs.setRadius(8);
+            });
             charBox.getChildren().add(selectBtn);
             
             javafx.scene.text.Text btnText = new javafx.scene.text.Text("Character " + i);
@@ -344,84 +364,136 @@ public class GameClient extends GameApplication {
         
         // 標題
         Text title = new Text("PLATFORM RACE");
-        title.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 60));
-        title.setFill(Color.GOLD);
+        title.setFont(Font.font("Verdana", javafx.scene.text.FontWeight.EXTRA_BOLD, 64));
+        title.setFill(Color.web("#ffd86b"));
+        title.setStroke(Color.rgb(30, 30, 30));
+        title.setStrokeWidth(1.5);
+        DropShadow titleDs = new DropShadow(18, Color.color(0,0,0,0.7));
+        title.setEffect(titleDs);
         Entity titleEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 250, 150)
                 .view(title)
                 .buildAndAttach();
         menuEntities.add(titleEntity);
         
-        // 創建公共房間按鈕
-        Rectangle createPublicBtn = new Rectangle(400, 70, Color.rgb(50, 150, 50));
+        // 創建公共房間按鈕（圓角 + 漸層 + 陰影）
+        Rectangle createPublicBtn = new Rectangle(400, 70);
+        createPublicBtn.setArcWidth(20);
+        createPublicBtn.setArcHeight(20);
+        LinearGradient publicGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#7ee58a")), new Stop(1, Color.web("#2f8f39")));
+        createPublicBtn.setFill(publicGrad);
         createPublicBtn.setStroke(Color.WHITE);
         createPublicBtn.setStrokeWidth(3);
+        DropShadow publicDs = new DropShadow(12, Color.color(0,0,0,0.6));
+        createPublicBtn.setEffect(publicDs);
+        createPublicBtn.setOnMouseEntered(e -> { createPublicBtn.setScaleX(1.03); createPublicBtn.setScaleY(1.03); publicDs.setRadius(18); });
+        createPublicBtn.setOnMouseExited(e -> { createPublicBtn.setScaleX(1.0); createPublicBtn.setScaleY(1.0); publicDs.setRadius(12); });
         Entity createPublicEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 200, 300)
-                .view(createPublicBtn)
-                .buildAndAttach();
+            .at(SCREEN_WIDTH / 2 - 200, 300)
+            .view(createPublicBtn)
+            .buildAndAttach();
         menuEntities.add(createPublicEntity);
         
         Text createPublicText = new Text("CREATE PUBLIC ROOM");
-        createPublicText.setFont(Font.font(24));
+        createPublicText.setFont(Font.font("Verdana", 24));
         createPublicText.setFill(Color.WHITE);
+        createPublicText.setStroke(Color.color(0,0,0,0.6));
+        createPublicText.setStrokeWidth(0.8);
+        createPublicText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity createPublicTextEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 150, 345)
                 .view(createPublicText)
                 .buildAndAttach();
         menuEntities.add(createPublicTextEntity);
         
-        // 創建私人房間按鈕
-        Rectangle createPrivateBtn = new Rectangle(400, 70, Color.rgb(50, 100, 150));
+        // 創建私人房間按鈕（圓角 + 漸層 + 陰影）
+        Rectangle createPrivateBtn = new Rectangle(400, 70);
+        createPrivateBtn.setArcWidth(20);
+        createPrivateBtn.setArcHeight(20);
+        LinearGradient privateGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#7fb4ff")), new Stop(1, Color.web("#2f6fb0")));
+        createPrivateBtn.setFill(privateGrad);
         createPrivateBtn.setStroke(Color.WHITE);
         createPrivateBtn.setStrokeWidth(3);
+        DropShadow privateDs = new DropShadow(12, Color.color(0,0,0,0.6));
+        createPrivateBtn.setEffect(privateDs);
+        createPrivateBtn.setOnMouseEntered(e -> { createPrivateBtn.setScaleX(1.03); createPrivateBtn.setScaleY(1.03); privateDs.setRadius(18); });
+        createPrivateBtn.setOnMouseExited(e -> { createPrivateBtn.setScaleX(1.0); createPrivateBtn.setScaleY(1.0); privateDs.setRadius(12); });
         Entity createPrivateEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 200, 400)
-                .view(createPrivateBtn)
-                .buildAndAttach();
+            .at(SCREEN_WIDTH / 2 - 200, 400)
+            .view(createPrivateBtn)
+            .buildAndAttach();
         menuEntities.add(createPrivateEntity);
         
         Text createPrivateText = new Text("CREATE PRIVATE ROOM");
-        createPrivateText.setFont(Font.font(24));
+        createPrivateText.setFont(Font.font("Verdana", 24));
         createPrivateText.setFill(Color.WHITE);
+        createPrivateText.setStroke(Color.color(0,0,0,0.6));
+        createPrivateText.setStrokeWidth(0.8);
+        createPrivateText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity createPrivateTextEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 155, 445)
                 .view(createPrivateText)
                 .buildAndAttach();
         menuEntities.add(createPrivateTextEntity);
         
-        // 加入隨機公共房間按鈕
-        Rectangle joinRandomBtn = new Rectangle(400, 70, Color.rgb(150, 50, 150));
+        // 加入隨機公共房間按鈕（圓角 + 漸層 + 陰影）
+        Rectangle joinRandomBtn = new Rectangle(400, 70);
+        joinRandomBtn.setArcWidth(20);
+        joinRandomBtn.setArcHeight(20);
+        LinearGradient randomGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#d784ff")), new Stop(1, Color.web("#8b3a9b")));
+        joinRandomBtn.setFill(randomGrad);
         joinRandomBtn.setStroke(Color.WHITE);
         joinRandomBtn.setStrokeWidth(3);
+        DropShadow randomDs = new DropShadow(12, Color.color(0,0,0,0.6));
+        joinRandomBtn.setEffect(randomDs);
+        joinRandomBtn.setOnMouseEntered(e -> { joinRandomBtn.setScaleX(1.03); joinRandomBtn.setScaleY(1.03); randomDs.setRadius(18); });
+        joinRandomBtn.setOnMouseExited(e -> { joinRandomBtn.setScaleX(1.0); joinRandomBtn.setScaleY(1.0); randomDs.setRadius(12); });
         Entity joinRandomEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 200, 500)
-                .view(joinRandomBtn)
-                .buildAndAttach();
+            .at(SCREEN_WIDTH / 2 - 200, 500)
+            .view(joinRandomBtn)
+            .buildAndAttach();
         menuEntities.add(joinRandomEntity);
         
         Text joinRandomText = new Text("JOIN RANDOM ROOM");
-        joinRandomText.setFont(Font.font(24));
+        joinRandomText.setFont(Font.font("Verdana", 24));
         joinRandomText.setFill(Color.WHITE);
+        joinRandomText.setStroke(Color.color(0,0,0,0.6));
+        joinRandomText.setStrokeWidth(0.8);
+        joinRandomText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity joinRandomTextEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 140, 545)
                 .view(joinRandomText)
                 .buildAndAttach();
         menuEntities.add(joinRandomTextEntity);
         
-        // 用房間碼加入按鈕
-        Rectangle joinCodeBtn = new Rectangle(400, 70, Color.rgb(50, 50, 150));
+        // 用房間碼加入按鈕（圓角 + 漸層 + 陰影）
+        Rectangle joinCodeBtn = new Rectangle(400, 70);
+        joinCodeBtn.setArcWidth(20);
+        joinCodeBtn.setArcHeight(20);
+        LinearGradient codeGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#7a7cff")), new Stop(1, Color.web("#3c47b5")));
+        joinCodeBtn.setFill(codeGrad);
         joinCodeBtn.setStroke(Color.WHITE);
         joinCodeBtn.setStrokeWidth(3);
+        DropShadow codeDs = new DropShadow(12, Color.color(0,0,0,0.6));
+        joinCodeBtn.setEffect(codeDs);
+        joinCodeBtn.setOnMouseEntered(e -> { joinCodeBtn.setScaleX(1.03); joinCodeBtn.setScaleY(1.03); codeDs.setRadius(18); });
+        joinCodeBtn.setOnMouseExited(e -> { joinCodeBtn.setScaleX(1.0); joinCodeBtn.setScaleY(1.0); codeDs.setRadius(12); });
         Entity joinCodeEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 200, 600)
-                .view(joinCodeBtn)
-                .buildAndAttach();
+            .at(SCREEN_WIDTH / 2 - 200, 600)
+            .view(joinCodeBtn)
+            .buildAndAttach();
         menuEntities.add(joinCodeEntity);
         
         Text joinCodeText = new Text("JOIN WITH CODE");
-        joinCodeText.setFont(Font.font(24));
+        joinCodeText.setFont(Font.font("Verdana", 24));
         joinCodeText.setFill(Color.WHITE);
+        joinCodeText.setStroke(Color.color(0,0,0,0.6));
+        joinCodeText.setStrokeWidth(0.8);
+        joinCodeText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity joinCodeTextEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 120, 645)
                 .view(joinCodeText)
@@ -441,12 +513,15 @@ public class GameClient extends GameApplication {
         
         // 說明文字
         Text hint = new Text("Public: Join anyone | Private: Need room code");
-        hint.setFont(Font.font(18));
+        hint.setFont(Font.font("Verdana", 18));
         hint.setFill(Color.LIGHTGRAY);
+        hint.setStroke(Color.color(0,0,0,0.5));
+        hint.setStrokeWidth(0.6);
+        hint.setEffect(new DropShadow(4, Color.color(0,0,0,0.5)));
         Entity hintEntity = FXGL.entityBuilder()
-                .at(SCREEN_WIDTH / 2 - 220, 800)
-                .view(hint)
-                .buildAndAttach();
+            .at(SCREEN_WIDTH / 2 - 220, 800)
+            .view(hint)
+            .buildAndAttach();
         menuEntities.add(hintEntity);
         
         uiState = UIState.MENU;
@@ -463,16 +538,22 @@ public class GameClient extends GameApplication {
         // 房間代碼顯示
         String roomType = currentRoomInfo.roomType == RoomType.PUBLIC ? "PUBLIC" : "PRIVATE";
         Text typeText = new Text("Type: " + roomType);
-        typeText.setFont(Font.font(20));
+        typeText.setFont(Font.font("Verdana", 20));
         typeText.setFill(currentRoomInfo.roomType == RoomType.PUBLIC ? Color.LIGHTGREEN : Color.LIGHTSALMON);
+        typeText.setStroke(Color.color(0,0,0,0.5));
+        typeText.setStrokeWidth(0.6);
+        typeText.setEffect(new DropShadow(6, Color.color(0,0,0,0.5)));
         Entity typeEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 50, 130)
                 .view(typeText)
                 .buildAndAttach();
         roomUIEntities.add(typeEntity);
         Text roomCodeText = new Text("Room Code: " + currentRoomInfo.roomCode);
-        roomCodeText.setFont(Font.font("Arial", javafx.scene.text.FontWeight.BOLD, 40));
-        roomCodeText.setFill(Color.GOLD);
+        roomCodeText.setFont(Font.font("Verdana", javafx.scene.text.FontWeight.BOLD, 44));
+        roomCodeText.setFill(Color.web("#ffd86b"));
+        roomCodeText.setStroke(Color.rgb(30, 30, 30));
+        roomCodeText.setStrokeWidth(1.2);
+        roomCodeText.setEffect(new DropShadow(14, Color.color(0,0,0,0.7)));
         Entity roomCodeEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 200, 100)
                 .view(roomCodeText)
@@ -485,8 +566,11 @@ public class GameClient extends GameApplication {
             "Waiting to start...";
         
         Text roundText = new Text(roundInfo);
-        roundText.setFont(Font.font(24));
+        roundText.setFont(Font.font("Verdana", 24));
         roundText.setFill(Color.CYAN);
+        roundText.setStroke(Color.color(0,0,0,0.6));
+        roundText.setStrokeWidth(0.8);
+        roundText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity roundEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 100, 150)
                 .view(roundText)
@@ -495,9 +579,12 @@ public class GameClient extends GameApplication {
         
         // 玩家列表
         Text playersTitle = new Text("Players (" + currentRoomInfo.playerIds.size() + "/" + 
-                                    currentRoomInfo.maxPlayers + "):");
-        playersTitle.setFont(Font.font(28));
+                        currentRoomInfo.maxPlayers + "):");
+        playersTitle.setFont(Font.font("Verdana", 28));
         playersTitle.setFill(Color.WHITE);
+        playersTitle.setStroke(Color.color(0,0,0,0.6));
+        playersTitle.setStrokeWidth(0.8);
+        playersTitle.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity playersTitleEntity = FXGL.entityBuilder()
                 .at(SCREEN_WIDTH / 2 - 300, 250)
                 .view(playersTitle)
@@ -516,8 +603,11 @@ public class GameClient extends GameApplication {
                             (isReady ? " ✓" : "");
             
             Text pText = new Text(playerText);
-            pText.setFont(Font.font(22));
-            pText.setFill(isMe ? Color.YELLOW : (isReady ? Color.GREEN : Color.WHITE));
+            pText.setFont(Font.font("Verdana", 22));
+            pText.setFill(isMe ? Color.YELLOW : (isReady ? Color.LIGHTGREEN : Color.WHITE));
+            pText.setStroke(Color.color(0,0,0,0.5));
+            pText.setStrokeWidth(0.6);
+            pText.setEffect(new DropShadow(4, Color.color(0,0,0,0.5)));
             Entity pEntity = FXGL.entityBuilder()
                     .at(SCREEN_WIDTH / 2 - 280, yOffset)
                     .view(pText)
@@ -533,18 +623,30 @@ public class GameClient extends GameApplication {
             Color btnColor = myReady ? Color.rgb(150, 150, 50) : Color.rgb(50, 150, 50);
             String btnText = myReady ? "CANCEL READY" : "READY";
             
-            Rectangle readyBtn = new Rectangle(300, 70, btnColor);
-            readyBtn.setStroke(Color.WHITE);
-            readyBtn.setStrokeWidth(3);
-            Entity readyBtnEntity = FXGL.entityBuilder()
+                Rectangle readyBtn = new Rectangle(300, 70);
+                readyBtn.setArcWidth(16);
+                readyBtn.setArcHeight(16);
+                LinearGradient readyGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+                    new Stop(0, btnColor.brighter()), new Stop(1, btnColor.darker()));
+                readyBtn.setFill(readyGrad);
+                readyBtn.setStroke(Color.WHITE);
+                readyBtn.setStrokeWidth(3);
+                DropShadow readyDs = new DropShadow(10, Color.color(0,0,0,0.6));
+                readyBtn.setEffect(readyDs);
+                readyBtn.setOnMouseEntered(e -> { readyBtn.setScaleX(1.03); readyBtn.setScaleY(1.03); readyDs.setRadius(16); });
+                readyBtn.setOnMouseExited(e -> { readyBtn.setScaleX(1.0); readyBtn.setScaleY(1.0); readyDs.setRadius(10); });
+                Entity readyBtnEntity = FXGL.entityBuilder()
                     .at(SCREEN_WIDTH / 2 - 150, 600)
                     .view(readyBtn)
                     .buildAndAttach();
-            roomUIEntities.add(readyBtnEntity);
+                roomUIEntities.add(readyBtnEntity);
             
             Text readyText = new Text(btnText);
-            readyText.setFont(Font.font(26));
+            readyText.setFont(Font.font("Verdana", 26));
             readyText.setFill(Color.WHITE);
+            readyText.setStroke(Color.color(0,0,0,0.6));
+            readyText.setStrokeWidth(0.8);
+            readyText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
             Entity readyTextEntity = FXGL.entityBuilder()
                     .at(SCREEN_WIDTH / 2 - (btnText.length() * 8), 645)
                     .view(readyText)
@@ -567,18 +669,30 @@ public class GameClient extends GameApplication {
             
             Color btnColor = canStart ? Color.rgb(50, 200, 50) : Color.rgb(100, 100, 100);
             
-            Rectangle startBtn = new Rectangle(300, 70, btnColor);
-            startBtn.setStroke(Color.WHITE);
-            startBtn.setStrokeWidth(3);
-            Entity startBtnEntity = FXGL.entityBuilder()
+                Rectangle startBtn = new Rectangle(300, 70);
+                startBtn.setArcWidth(16);
+                startBtn.setArcHeight(16);
+                LinearGradient startGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+                    new Stop(0, btnColor.brighter()), new Stop(1, btnColor.darker()));
+                startBtn.setFill(startGrad);
+                startBtn.setStroke(Color.WHITE);
+                startBtn.setStrokeWidth(3);
+                DropShadow startDs = new DropShadow(10, Color.color(0,0,0,0.6));
+                startBtn.setEffect(startDs);
+                startBtn.setOnMouseEntered(e -> { startBtn.setScaleX(1.03); startBtn.setScaleY(1.03); startDs.setRadius(16); });
+                startBtn.setOnMouseExited(e -> { startBtn.setScaleX(1.0); startBtn.setScaleY(1.0); startDs.setRadius(10); });
+                Entity startBtnEntity = FXGL.entityBuilder()
                     .at(SCREEN_WIDTH / 2 - 150, 700)
                     .view(startBtn)
                     .buildAndAttach();
-            roomUIEntities.add(startBtnEntity);
+                roomUIEntities.add(startBtnEntity);
             
             Text startText = new Text("START GAME");
-            startText.setFont(Font.font(26));
+            startText.setFont(Font.font("Verdana", 26));
             startText.setFill(Color.WHITE);
+            startText.setStroke(Color.color(0,0,0,0.6));
+            startText.setStrokeWidth(0.8);
+            startText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
             Entity startTextEntity = FXGL.entityBuilder()
                     .at(SCREEN_WIDTH / 2 - 100, 745)
                     .view(startText)
@@ -587,8 +701,11 @@ public class GameClient extends GameApplication {
             
             if (!canStart) {
                 Text waitText = new Text("Waiting for all players to ready...");
-                waitText.setFont(Font.font(18));
+                waitText.setFont(Font.font("Verdana", 18));
                 waitText.setFill(Color.ORANGE);
+                waitText.setStroke(Color.color(0,0,0,0.5));
+                waitText.setStrokeWidth(0.6);
+                waitText.setEffect(new DropShadow(4, Color.color(0,0,0,0.5)));
                 Entity waitEntity = FXGL.entityBuilder()
                         .at(SCREEN_WIDTH / 2 - 180, 790)
                         .view(waitText)
@@ -598,18 +715,30 @@ public class GameClient extends GameApplication {
         }
         
         // 離開房間按鈕
-        Rectangle leaveBtn = new Rectangle(200, 50, Color.rgb(150, 50, 50));
+        Rectangle leaveBtn = new Rectangle(200, 50);
+        leaveBtn.setArcWidth(12);
+        leaveBtn.setArcHeight(12);
+        LinearGradient leaveGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+            new Stop(0, Color.web("#ff8a8a")), new Stop(1, Color.web("#b93a3a")));
+        leaveBtn.setFill(leaveGrad);
         leaveBtn.setStroke(Color.WHITE);
         leaveBtn.setStrokeWidth(2);
+        DropShadow leaveDs = new DropShadow(8, Color.color(0,0,0,0.6));
+        leaveBtn.setEffect(leaveDs);
+        leaveBtn.setOnMouseEntered(e -> { leaveBtn.setScaleX(1.03); leaveBtn.setScaleY(1.03); leaveDs.setRadius(14); });
+        leaveBtn.setOnMouseExited(e -> { leaveBtn.setScaleX(1.0); leaveBtn.setScaleY(1.0); leaveDs.setRadius(8); });
         Entity leaveBtnEntity = FXGL.entityBuilder()
-                .at(50, SCREEN_HEIGHT - 100)
-                .view(leaveBtn)
-                .buildAndAttach();
+            .at(50, SCREEN_HEIGHT - 100)
+            .view(leaveBtn)
+            .buildAndAttach();
         roomUIEntities.add(leaveBtnEntity);
         
         Text leaveText = new Text("LEAVE");
-        leaveText.setFont(Font.font(20));
+        leaveText.setFont(Font.font("Verdana", 20));
         leaveText.setFill(Color.WHITE);
+        leaveText.setStroke(Color.color(0,0,0,0.6));
+        leaveText.setStrokeWidth(0.8);
+        leaveText.setEffect(new DropShadow(6, Color.color(0,0,0,0.6)));
         Entity leaveTextEntity = FXGL.entityBuilder()
                 .at(120, SCREEN_HEIGHT - 63)
                 .view(leaveText)
@@ -1181,18 +1310,35 @@ private void createGameZones() {
     private void showFinishButton() {
         System.out.println("[CLIENT] Showing finish button");
         finishPane.getChildren().clear();
-
-        Rectangle btnBg = new Rectangle(200, 60, Color.rgb(50, 200, 50));
+        Rectangle btnBg = new Rectangle(220, 70);
+        btnBg.setArcWidth(18);
+        btnBg.setArcHeight(18);
+        LinearGradient finishGrad = new LinearGradient(0, 0, 0, 1, true, CycleMethod.NO_CYCLE,
+                new Stop(0, Color.web("#9ef08f")), new Stop(1, Color.web("#3aa23a")));
+        btnBg.setFill(finishGrad);
         btnBg.setStroke(Color.WHITE);
         btnBg.setStrokeWidth(3);
-        btnBg.setLayoutX(SCREEN_WIDTH - 250);
-        btnBg.setLayoutY(SCREEN_HEIGHT - 100);
+        btnBg.setLayoutX(SCREEN_WIDTH - 260);
+        btnBg.setLayoutY(SCREEN_HEIGHT - 110);
+        DropShadow finishDs = new DropShadow(14, Color.color(0,0,0,0.7));
+        btnBg.setEffect(finishDs);
 
         Text btnText = new Text("FINISH");
-        btnText.setFont(Font.font(24));
+        btnText.setFont(Font.font("Verdana", javafx.scene.text.FontWeight.BOLD, 28));
         btnText.setFill(Color.WHITE);
-        btnText.setLayoutX(SCREEN_WIDTH - 200);
-        btnText.setLayoutY(SCREEN_HEIGHT - 62);
+        btnText.setStroke(Color.color(0,0,0,0.6));
+        btnText.setStrokeWidth(0.9);
+        btnText.setLayoutX(SCREEN_WIDTH - 210 - 8);
+        btnText.setLayoutY(SCREEN_HEIGHT - 74);
+        btnText.setEffect(new DropShadow(8, Color.color(0,0,0,0.6)));
+
+        // hover interaction on Pane children
+        btnBg.setOnMouseEntered(e -> { btnBg.setScaleX(1.04); btnBg.setScaleY(1.04); finishDs.setRadius(20); });
+        btnBg.setOnMouseExited(e -> { btnBg.setScaleX(1.0); btnBg.setScaleY(1.0); finishDs.setRadius(14); });
+        btnBg.setOnMouseClicked(e -> {
+            // 呼叫現有的確認放置函式
+            confirmPlacement();
+        });
 
         finishPane.getChildren().addAll(btnBg, btnText);
     }
@@ -3316,7 +3462,7 @@ class PlayerControl extends Component {
     private double speed = 420.0;  // 減低移動靈敏度：最大水平速度降低到 420 px/s
     private double velocityX = 0;
     public double velocityY = 0;  // 改為public以便死亡檢測使用
-    private double jumpStrength = 650.0;  // 改為 pixels/second (增加跳躍力度至 650，讓跳躍更有力不飄)
+    private double jumpStrength = 480.0;  // 改為 pixels/second (降低一般跳躍力度以讓彈簧更強烈)
     private double gravity = 1400.0;  // 增加重力，使下落更明顯
     private double gravityUp = 1000.0;  // 上升時使用較輕的重力
     // 水平加速度，用於平滑按鍵響應（降低靈敏度）
@@ -3654,7 +3800,7 @@ class RotatingPlatformComponent extends Component {
 
 // 彈跳平台組件
 class BouncePlatformComponent extends Component {
-    private static final double BOUNCE_STRENGTH = 800.0;  // pixels/second，增加彈跳力度
+    private static final double BOUNCE_STRENGTH = 800.0; 
     
     public double getBounceStrength() {
         return BOUNCE_STRENGTH;
@@ -3682,9 +3828,31 @@ class TurretComponent extends Component {
     }
     
     private void fireBullet() {
-        Circle bullet = new Circle(8, Color.ORANGE);
-        bullet.setStroke(Color.RED);
-        bullet.setStrokeWidth(2);
+        // 嘗試使用火焰圖片作為子彈視覺
+        javafx.scene.image.Image fireImg = null;
+        try {
+            fireImg = new javafx.scene.image.Image("file:map picture/fire.png");
+        } catch (Exception e) {
+            System.err.println("[TURRET] Failed to load fire.png: " + e.getMessage());
+        }
+
+        javafx.scene.Node bulletView;
+        double imgSize = 24;
+        if (fireImg != null && fireImg.getWidth() > 0) {
+            javafx.scene.image.ImageView iv = new javafx.scene.image.ImageView(fireImg);
+            iv.setFitWidth(imgSize);
+            iv.setFitHeight(imgSize);
+            iv.setPreserveRatio(true);
+            // 將圖像中心對齊實體位置
+            iv.setTranslateX(-imgSize / 2.0);
+            iv.setTranslateY(-imgSize / 2.0);
+            bulletView = iv;
+        } else {
+            Circle fallback = new Circle(8, Color.ORANGE);
+            fallback.setStroke(Color.RED);
+            fallback.setStrokeWidth(2);
+            bulletView = fallback;
+        }
 
         // 以平台碰撞尺寸的中心作為發射點，避免視覺上從左上角出彈
         double w = entity.hasComponent(PlatformComponent.class)
@@ -3699,7 +3867,7 @@ class TurretComponent extends Component {
 
         Entity bulletEntity = FXGL.entityBuilder()
             .at(cx, cy)
-            .view(bullet)
+            .view(bulletView)
             .with(new BulletComponent(-1, 0)) // 一律往左射出
             .buildAndAttach();
         bullets.add(bulletEntity);
