@@ -772,6 +772,9 @@ public class GameClient extends GameApplication {
         settings.setTitle("Multiplayer Platform Race");
         settings.setFullScreenAllowed(true);
         settings.setFullScreenFromStart(false);
+        settings.setManualResizeEnabled(true);  // 允許手動調整窗口大小
+        settings.setPreserveResizeRatio(true);  // 保持窗口的寬高比
+        settings.setScaleAffectedOnResize(true); // 窗口縮放時遊戲畫面也跟著縮放
     }
 
     @Override
