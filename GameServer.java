@@ -870,7 +870,7 @@ class Room {
         }
     }
     
- public boolean allPlayersReady() {
+    public boolean allPlayersReady() {
     synchronized (lock) {
         if (info.playerIds.isEmpty()) return false;
         for (String pid : info.playerIds) {
