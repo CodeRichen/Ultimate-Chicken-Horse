@@ -1212,7 +1212,7 @@ private void createGameZones() {
                     objRect.setLayoutY(yPos + 50 - obj.height / 2.0);
                     selectionPane.getChildren().add(objRect);
                 }
-            } else if (obj.type == ObjectType.TURRET) {
+                    } else if (obj.type == ObjectType.TURRET) {
                 javafx.scene.shape.Rectangle turretBody = new javafx.scene.shape.Rectangle(obj.width, obj.height);
                 javafx.scene.paint.LinearGradient gradient = new javafx.scene.paint.LinearGradient(
                     0, 0, 1, 0, true, javafx.scene.paint.CycleMethod.NO_CYCLE,
@@ -1225,19 +1225,6 @@ private void createGameZones() {
                 turretBody.setLayoutX(SCREEN_WIDTH / 2.0 - obj.width / 2.0);
                 turretBody.setLayoutY(yPos + 50 - obj.height / 2.0);
                 selectionPane.getChildren().add(turretBody);
-            } else if (obj.type == ObjectType.ROTATING) {
-                javafx.scene.shape.Rectangle rotatingRect = new javafx.scene.shape.Rectangle(obj.width, obj.height);
-                javafx.scene.paint.LinearGradient gradient = new javafx.scene.paint.LinearGradient(
-                    0, 0, 1, 1, true, javafx.scene.paint.CycleMethod.NO_CYCLE,
-                    new javafx.scene.paint.Stop(0, javafx.scene.paint.Color.web("#89C2FF")),
-                    new javafx.scene.paint.Stop(1, javafx.scene.paint.Color.web("#5E60CE"))
-                );
-                rotatingRect.setFill(gradient);
-                rotatingRect.setStroke(javafx.scene.paint.Color.WHITE);
-                rotatingRect.setStrokeWidth(2);
-                rotatingRect.setLayoutX(SCREEN_WIDTH / 2.0 - obj.width / 2.0);
-                rotatingRect.setLayoutY(yPos + 50 - obj.height / 2.0);
-                selectionPane.getChildren().add(rotatingRect);
             } else {
                 Rectangle objRect = new Rectangle(obj.width, obj.height, Color.web(obj.color));
                 objRect.setStroke(Color.YELLOW);
@@ -1292,7 +1279,7 @@ private void createGameZones() {
                 case MOVING_V -> "垂直移動：上下往返，注意時機";
                 case BOUNCE -> "彈跳：踩上彈射提高高度";
                 case TURRET -> "砲塔：定期射出子彈";
-                case ROTATING -> "旋轉：平台持續旋轉，踩點要抓時機";
+                // ROTATING removed: treated as normal platform
                 default -> "普通平台";
             };
             }
@@ -2355,18 +2342,9 @@ private void handlePhaseChange(GamePhase newPhase) {
                 return e;
             }
             case ROTATING: {
+                // Treat ROTATING as a normal platform (rotation removed)
                 Node view = buildPlatformView(p, color);
-                double rotationSpeed = info.moveSpeed > 0 ? info.moveSpeed : 60.0;
-                e = FXGL.entityBuilder()
-                        .at(p.x, p.y)
-                        .view(view)
-                        .with(new PlatformComponent(p.width, p.height))
-                        .with(new RotatingPlatformComponent(rotationSpeed))
-                        .buildAndAttach();
-                e.getTransformComponent().setRotationOrigin(new Point2D(p.width / 2.0, p.height / 2.0));
-                e.setRotation(p.rotation);
-                platformEntities.add(e);
-                return e;
+                return createPlatformWithRotation(p.x, p.y, p.width, p.height, color, p.rotation, view);
             }
             case TURRET: {
                 // Turret 優先使用圖片，如果沒有則使用漸層
@@ -2772,7 +2750,7 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onActionBegin() {
                 if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && 
                     previewPlatform != null && myPlacement == null && 
-                    selectedObj != null && (selectedObj.type == ObjectType.TURRET || selectedObj.type == ObjectType.DEATH || selectedObj.type == ObjectType.ROTATING)) {
+                    selectedObj != null && (selectedObj.type == ObjectType.TURRET || selectedObj.type == ObjectType.DEATH)) {
                     currentRotation -= 90;
                     previewPlatform.getTransformComponent().setRotationOrigin(new Point2D(previewPlatform.getWidth() / 2.0, previewPlatform.getHeight() / 2.0));
                     previewPlatform.setRotation(currentRotation);
@@ -2786,7 +2764,7 @@ private void handlePhaseChange(GamePhase newPhase) {
             protected void onActionBegin() {
                 if ((currentPhase == GamePhase.PLACING || currentPhase == GamePhase.SELECTING) && 
                     previewPlatform != null && myPlacement == null && 
-                    selectedObj != null && (selectedObj.type == ObjectType.TURRET || selectedObj.type == ObjectType.DEATH || selectedObj.type == ObjectType.ROTATING)) {
+                    selectedObj != null && (selectedObj.type == ObjectType.TURRET || selectedObj.type == ObjectType.DEATH)) {
                     currentRotation += 90;
                     previewPlatform.getTransformComponent().setRotationOrigin(new Point2D(previewPlatform.getWidth() / 2.0, previewPlatform.getHeight() / 2.0));
                     previewPlatform.setRotation(currentRotation);
@@ -2967,19 +2945,6 @@ private void handlePhaseChange(GamePhase newPhase) {
                 turretBody.setStroke(javafx.scene.paint.Color.ORANGE);
                 turretBody.setStrokeWidth(3);
                 viewNode = turretBody;
-            } else if (selectedObj.type == ObjectType.ROTATING) {
-                javafx.scene.shape.Rectangle rotatingRect = new javafx.scene.shape.Rectangle(
-                    selectedObj.width, selectedObj.height);
-                javafx.scene.paint.LinearGradient gradient = new javafx.scene.paint.LinearGradient(
-                    0, 0, 1, 1, true, javafx.scene.paint.CycleMethod.NO_CYCLE,
-                    new javafx.scene.paint.Stop(0, javafx.scene.paint.Color.web("#89C2FF")),
-                    new javafx.scene.paint.Stop(1, javafx.scene.paint.Color.web("#5E60CE"))
-                );
-                rotatingRect.setFill(gradient);
-                rotatingRect.setStroke(javafx.scene.paint.Color.WHITE);
-                rotatingRect.setStrokeWidth(3);
-                rotatingRect.setRotate(-10);
-                viewNode = rotatingRect;
             } else {
                 // 一般平台，顯示顏色
                 Rectangle rect = new Rectangle(selectedObj.width, selectedObj.height, Color.web(selectedObj.color));
@@ -3779,24 +3744,7 @@ class MovingPlatformComponent extends Component {
     public boolean isHorizontal() { return horizontal; }
 }
 
-// 旋轉平台組件
-class RotatingPlatformComponent extends Component {
-    private final double rotationSpeedDeg;
-
-    public RotatingPlatformComponent(double rotationSpeedDeg) {
-        this.rotationSpeedDeg = rotationSpeedDeg;
-    }
-
-    @Override
-    public void onAdded() {
-        entity.getTransformComponent().setRotationOrigin(new Point2D(entity.getWidth() / 2.0, entity.getHeight() / 2.0));
-    }
-
-    @Override
-    public void onUpdate(double tpf) {
-        entity.rotateBy(rotationSpeedDeg * tpf);
-    }
-}
+// RotatingPlatformComponent removed — rotating platforms are treated as normal platforms now.
 
 // 彈跳平台組件
 class BouncePlatformComponent extends Component {
