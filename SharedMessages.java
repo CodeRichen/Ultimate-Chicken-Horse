@@ -194,15 +194,19 @@ class PlayerInfo implements Serializable {
     double x;
     double y;
     boolean crouching;
-    double scaleY;
+    double scaleX;  // 水平縮放（用於翻轉）
+    double scaleY;  // 垂直縮放（用於下蹲）
+    String animationState;  // 新增：動畫狀態（idle, walk, jump, fall, death）
     
-    public PlayerInfo(String playerId, String colorHex, double x, double y, boolean crouching, double scaleY) {
+    public PlayerInfo(String playerId, String colorHex, double x, double y, boolean crouching, double scaleX, double scaleY, String animationState) {
         this.playerId = playerId;
         this.colorHex = colorHex;
         this.x = x;
         this.y = y;
         this.crouching = crouching;
+        this.scaleX = scaleX;
         this.scaleY = scaleY;
+        this.animationState = animationState;
     }
 }
 

@@ -1491,6 +1491,50 @@ private void hideLeaderboard() {
                         System.out.println("[CLIENT] Received character selection from " + charMsg.playerId + ": " + charMsg.characterIndex);
                         javafx.application.Platform.runLater(() -> {
                             playerCharacters.put(charMsg.playerId, charMsg.characterIndex);
+                            System.out.println("[CLIENT] Updated playerCharacters map for " + charMsg.playerId + " -> " + charMsg.characterIndex);
+                            
+                            // 如果該玩家的實體已經存在，更新其視圖以顯示正確的角色
+                            Entity existingPlayer = otherPlayers.get(charMsg.playerId);
+                            if (existingPlayer != null) {
+                                System.out.println("[CLIENT] Found existing player entity for " + charMsg.playerId + ", updating view...");
+                                String label = getPlayerLabel(currentRoomInfo, charMsg.playerId);
+                                Color playerColor = Color.RED; // 預設顏色
+                                
+                                // 嘗試從視圖中獲取當前顏色
+                                for (javafx.scene.Node node : existingPlayer.getViewComponent().getChildren()) {
+                                    if (node instanceof javafx.scene.Group group) {
+                                        for (javafx.scene.Node inner : group.getChildren()) {
+                                            if (inner instanceof Circle innerCircle) {
+                                                playerColor = (Color) innerCircle.getFill();
+                                                System.out.println("[CLIENT] Extracted color from Circle: " + playerColor);
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                    } else if (node instanceof Circle circle) {
+                                        playerColor = (Color) circle.getFill();
+                                        System.out.println("[CLIENT] Extracted color from Circle: " + playerColor);
+                                        break;
+                                    }
+                                }
+                                
+                                javafx.scene.Node newView = buildPlayerView(label, playerColor, charMsg.playerId);
+                                existingPlayer.getViewComponent().clearChildren();
+                                existingPlayer.getViewComponent().addChild(newView);
+                                System.out.println("[CLIENT] Rebuilt player view with new character");
+                                
+                                // 更新動畫組件的角色索引
+                                PlayerAnimationComponent anim = existingPlayer.getComponentOptional(PlayerAnimationComponent.class).orElse(null);
+                                if (anim != null) {
+                                    anim.setCharacterIndex(charMsg.characterIndex);
+                                    anim.refreshImageViewFromEntity();
+                                    System.out.println("[CLIENT] Updated animation component to character " + charMsg.characterIndex);
+                                }
+                                
+                                System.out.println("[CLIENT] Successfully updated existing player " + charMsg.playerId + " to character " + charMsg.characterIndex);
+                            } else {
+                                System.out.println("[CLIENT] No existing player entity found for " + charMsg.playerId + ", will use character " + charMsg.characterIndex + " when entity is created");
+                            }
                         });
                     }
                     else if (obj instanceof RandomPlatformsMessage mapMsg) {
@@ -1722,16 +1766,24 @@ private void hideLeaderboard() {
         new Thread(() -> {
             while (running) {
                 try {
-                    // 只在遊戲中且玩家可見時發送位置
-                    if (connected && uiState == UIState.PLAYING && 
-                        player != null && player.isVisible() ) {
+                    // 在遊戲中時發送位置（不論可見與否，以便傳送死亡動畫狀態）
+                    if (connected && uiState == UIState.PLAYING && player != null) {
                         synchronized (out) {
                             PlayerControl pc = player.getComponent(PlayerControl.class);
+                            PlayerAnimationComponent animComp = player.getComponent(PlayerAnimationComponent.class);
+                            String currentAnimState = (animComp != null) ? animComp.getState() : "idle";
+                            // 從 ImageView 獲取正確的 scaleX（1 或 -1），而不是從 Entity Transform
+                            double actualScaleX = 1.0;
+                            if (animComp != null && animComp.getImageView() != null) {
+                                actualScaleX = animComp.getImageView().getScaleX();
+                            }
                             PlayerInfo info = new PlayerInfo(
                                 myPlayerId, toHex(myColor),
                                 player.getX(), player.getY(),
                                 pc.isCrouching(),
-                                player.getTransformComponent().getScaleY()
+                                actualScaleX,  // 使用 ImageView 的 scaleX
+                                player.getTransformComponent().getScaleY(),
+                                currentAnimState
                             );
                             out.writeObject(info);
                             out.flush();
@@ -1985,9 +2037,12 @@ private void handlePhaseChange(GamePhase newPhase) {
         if (otherPlayer == null && currentPhase == GamePhase.PLAYING) {
             Color playerColor = Color.web(info.colorHex);
             String label = getPlayerLabel(currentRoomInfo, info.playerId);
-            javafx.scene.Node view = buildPlayerView(label, playerColor, info.playerId);
             
             int charIdx = playerCharacters.getOrDefault(info.playerId, 1);
+            System.out.println("[CLIENT] Creating other player " + info.playerId + " with character index: " + charIdx + " (from playerCharacters map)");
+            
+            javafx.scene.Node view = buildPlayerView(label, playerColor, info.playerId);
+            
             PlayerAnimationComponent animComp = new PlayerAnimationComponent(charIdx);
             SmoothPlayerComponent smoothComponent = new SmoothPlayerComponent();
             
@@ -1998,13 +2053,28 @@ private void handlePhaseChange(GamePhase newPhase) {
                     .with(smoothComponent)
                     .buildAndAttach();
             
+            // 立即設置初始的翻轉狀態
+            smoothComponent.setTargetScaleX(info.scaleX);
+            smoothComponent.setTargetScaleY(info.scaleY);
+            animComp.setFlipX(info.scaleX);  // 直接設置初始翻轉
+            System.out.println("[CLIENT] Set initial scaleX=" + info.scaleX + " for other player " + info.playerId);
+            
             updatePlayerLabel(otherPlayer, label);
             otherPlayers.put(info.playerId, otherPlayer);
-            System.out.println("[CLIENT] Created other player: " + info.playerId);
+            System.out.println("[CLIENT] Created other player: " + info.playerId + " with character " + charIdx);
         } else if (otherPlayer != null) {
             SmoothPlayerComponent smoothComponent = otherPlayer.getComponent(SmoothPlayerComponent.class);
             smoothComponent.setTargetPosition(info.x, info.y);
+            smoothComponent.setTargetScaleX(info.scaleX);  // 更新水平縮放（翻轉）
             smoothComponent.setTargetScaleY(info.scaleY);
+            
+            System.out.println("[CLIENT] Updated other player " + info.playerId + " scaleX=" + info.scaleX);
+            
+            // 更新動畫狀態
+            PlayerAnimationComponent animComp = otherPlayer.getComponent(PlayerAnimationComponent.class);
+            if (animComp != null && info.animationState != null && !info.animationState.isEmpty()) {
+                animComp.setState(info.animationState);
+            }
         }
     }
     
@@ -3005,10 +3075,17 @@ private void handlePhaseChange(GamePhase newPhase) {
                             out.reset();
                         }
                         hasFailed = true;
-                        player.setVisible(false);
+                        // 播放死亡動畫
+                        PlayerAnimationComponent animComp = player.getComponent(PlayerAnimationComponent.class);
+                        if (animComp != null) {
+                            animComp.setState("death");
+                            System.out.println("[CLIENT] Death animation triggered (bullet hit)!");
+                        }
+                        // 開始恢復計時
+                        deathRecoveryTimer = 2.0;
                         // 禁用玩家移動,但允許觀戰
                         player.getComponent(PlayerControl.class).setEnabled(false);
-                        System.out.println("[CLIENT] Hit by bullet! Can spectate with A/D");
+                        System.out.println("[CLIENT] Hit by bullet! Playing death animation, can spectate with A/D");
                     } catch (Exception ex) {
                         System.err.println("[CLIENT ERROR] Failed to send fail message: " + ex.getMessage());
                     }
@@ -3125,10 +3202,17 @@ private void handlePhaseChange(GamePhase newPhase) {
                     out.reset();
                 }
                 hasFailed = true;
-                player.setVisible(false);
+                // 播放死亡動畫
+                PlayerAnimationComponent animComp = player.getComponent(PlayerAnimationComponent.class);
+                if (animComp != null) {
+                    animComp.setState("death");
+                    System.out.println("[CLIENT] Death animation triggered (fell off map)!");
+                }
+                // 開始恢復計時
+                deathRecoveryTimer = 2.0;
                 // 禁用玩家移動,但允許觀戰
                 player.getComponent(PlayerControl.class).setEnabled(false);
-                System.out.println("[CLIENT] Failed - fell off map (y=" + playerY + "), can spectate with A/D");
+                System.out.println("[CLIENT] Failed - fell off map (y=" + playerY + "), playing death animation, can spectate with A/D");
             } catch (Exception e) {
                 System.err.println("[CLIENT ERROR] Failed to send fail message: " + e.getMessage());
             }
@@ -3157,6 +3241,7 @@ private void handlePhaseChange(GamePhase newPhase) {
 
 class SmoothPlayerComponent extends Component {
     private Point2D targetPosition;
+    private double targetScaleX = 1.0;
     private double targetScaleY = 1.0;
     private final double SMOOTHING = 0.3;
 
@@ -3166,6 +3251,11 @@ class SmoothPlayerComponent extends Component {
 
     public void setTargetPosition(double x, double y) {
         this.targetPosition = new Point2D(x, y);
+    }
+
+    public void setTargetScaleX(double scaleX) {
+        this.targetScaleX = scaleX;
+        System.out.println("[SMOOTH COMPONENT] setTargetScaleX: " + scaleX);
     }
 
     public void setTargetScaleY(double scaleY) {
@@ -3186,6 +3276,14 @@ class SmoothPlayerComponent extends Component {
         
         entity.setPosition(newX, newY);
 
+        // 直接設置 ImageView 的翻轉（不通過 Entity Transform）
+        // 因為 Entity Transform 的 scaleX 會影響所有子節點，造成視覺問題
+        PlayerAnimationComponent animComp = entity.getComponentOptional(PlayerAnimationComponent.class).orElse(null);
+        if (animComp != null) {
+            animComp.setFlipX(targetScaleX);  // 直接設置 ImageView 的 scaleX
+        }
+
+        // 平滑更新垂直縮放（下蹲）
         double currentScaleY = entity.getTransformComponent().getScaleY();
         double newScaleY = currentScaleY + (targetScaleY - currentScaleY) * SMOOTHING;
         entity.getTransformComponent().setScaleY(newScaleY);
@@ -3421,6 +3519,15 @@ public void onUpdate(double tpf) {
         double inputX = 0;
         if (leftHeld) inputX -= 1;
         if (rightHeld) inputX += 1;
+        
+        // 根據實際移動方向更新翻轉（只在有單向輸入時更新）
+        if (inputX < 0) {
+            setFacing(-1);  // 面向左邊
+        } else if (inputX > 0) {
+            setFacing(1);  // 面向右邊
+        }
+        // 如果 inputX == 0（沒有按鍵或同時按左右），保持當前朝向不變
+        
         double targetVx = inputX * speed;
         double maxDelta = horizontalAccel * dt;
         double delta = targetVx - velocityX;
@@ -3539,12 +3646,17 @@ public void onUpdate(double tpf) {
             // 只改變 ImageView 的 scaleX，不改變整個 entity
             // 這樣 nameText 就不會受到影響
             // 每次都從 animationComponent 獲取最新的 imageView
-            ImageView currentImageView = (animComponent != null) ? animComponent.getImageView() : imageView;
-            if (currentImageView != null) {
-                currentImageView.setScaleX(direction);
-                System.out.println("[PLAYER CONTROL] Set facing to " + (direction == 1 ? "RIGHT" : "LEFT") + ", scaleX=" + currentImageView.getScaleX());
+            if (animComponent != null) {
+                animComponent.setFlipX(direction);  // 通過動畫組件設置翻轉
+                System.out.println("[PLAYER CONTROL] Set facing to " + (direction == 1 ? "RIGHT" : "LEFT") + " via animComponent");
             } else {
-                System.err.println("[PLAYER CONTROL] Cannot set facing: imageView is null!");
+                ImageView currentImageView = imageView;
+                if (currentImageView != null) {
+                    currentImageView.setScaleX(direction);
+                    System.out.println("[PLAYER CONTROL] Set facing to " + (direction == 1 ? "RIGHT" : "LEFT") + ", scaleX=" + currentImageView.getScaleX());
+                } else {
+                    System.err.println("[PLAYER CONTROL] Cannot set facing: imageView is null!");
+                }
             }
         }
     }
@@ -3806,6 +3918,7 @@ class PlayerAnimationComponent extends Component {
     private double deathFrameInterval = 0.15;  // death 幀速率（稍快以顯示死亡動畫）
     // idle 動畫只循環 1~8，跳過第 0 幀（空白的 player1.png）
     private ImageView imageView;
+    private double currentFlipX = 1.0;  // 記住當前的翻轉狀態
     
     public PlayerAnimationComponent(int characterIndex) {
         this.characterIndex = characterIndex;
@@ -4070,6 +4183,7 @@ class PlayerAnimationComponent extends Component {
         imageView.setPreserveRatio(true);
         imageView.setTranslateX(-64);
         imageView.setTranslateY(-64);
+        imageView.setScaleX(currentFlipX);  // 恢復翻轉狀態
     }
     
     public void setState(String newState) {
@@ -4102,6 +4216,7 @@ class PlayerAnimationComponent extends Component {
                     imageView.setPreserveRatio(true);
                     imageView.setTranslateX(-64);
                     imageView.setTranslateY(-64);
+                    imageView.setScaleX(currentFlipX);  // 恢復翻轉狀態
                     System.out.println("[ANIMATION] Successfully changed to " + newState + " (frame " + currentFrame + "/" + frames.size() + ", size: " + img.getWidth() + "x" + img.getHeight() + ")");
                 } else {
                     System.err.println("[ANIMATION] Frame " + currentFrame + " in state " + newState + " is null or empty (img=" + img + ")");
@@ -4114,6 +4229,15 @@ class PlayerAnimationComponent extends Component {
     
     public String getState() {
         return currentState;
+    }
+    
+    // 設置 ImageView 的水平翻轉（接受 1 或 -1）
+    public void setFlipX(double scaleX) {
+        this.currentFlipX = scaleX;  // 記住翻轉狀態
+        if (imageView != null) {
+            imageView.setScaleX(scaleX);
+            System.out.println("[ANIM COMPONENT] setFlipX called with scaleX=" + scaleX);
+        }
     }
     
     public ImageView getImageView() {
