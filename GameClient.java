@@ -21,16 +21,16 @@ import com.almasb.fxgl.input.UserAction;
 import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.effect.DropShadow;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.Pane;
-import javafx.scene.effect.DropShadow;
 import javafx.scene.paint.Color;
+import javafx.scene.paint.CycleMethod;
 import javafx.scene.paint.LinearGradient;
 import javafx.scene.paint.Stop;
-import javafx.scene.paint.CycleMethod;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
@@ -2165,6 +2165,11 @@ private void handlePhaseChange(GamePhase newPhase) {
     }
     
     private void updateOtherPlayer(PlayerInfo info) {
+        // 忽略自己的 PlayerInfo（防止房主看到透明的自己）
+        if (info.playerId.equals(myPlayerId)) {
+            return;
+        }
+        
         Entity otherPlayer = otherPlayers.get(info.playerId);
         
         if (otherPlayer == null && currentPhase == GamePhase.PLAYING) {
